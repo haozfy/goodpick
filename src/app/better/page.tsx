@@ -1,6 +1,6 @@
 // src/app/api/better/route.ts
 import { NextResponse } from "next/server";
-import { getOrCreateSessionId } from "@/lib/session";
+import { getSessionKey } from "@/lib/session";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 const POOL = [
@@ -11,7 +11,7 @@ const POOL = [
 ];
 
 export async function GET() {
-  const sessionId = getOrCreateSessionId();
+  const sessionId = getSessionKey();
 
   // 先占位：后续接 Stripe 变 true
   const isPro = false;
