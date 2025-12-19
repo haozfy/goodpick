@@ -2,36 +2,35 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getSessionKey } from "@/lib/session";
 
-export const runtime = "nodejs";
-
 export async function GET() {
   try {
-    const sessionKey = getSessionKey();
+    const sessionKey = await getSessionKey();
 
-    const { data: session } = await supabaseAdmin
+    if (!sessionKey) {
+      return NextResponse.json({ ok: true, history: [] });
+    }
+
+    // ✅ 关键修复点
+    const supabase = supabaseAdmin();
+
+    const { data, error } = await supabase
       .from("gp_sessions")
-      .select("id")
+      .select("id, created_at, result")
       .eq("session_key", sessionKey)
-      .single();
-
-    if (!session) return NextResponse.json({ items: [] });
-
-    const { data } = await supabaseAdmin
-      .from("gp_scans")
-      .select("id,product_name,verdict,created_at")
-      .eq("session_id", session.id)
       .order("created_at", { ascending: false })
-      .limit(30);
+      .limit(20);
+
+    if (error) {
+      console.error(error);
+      return NextResponse.json({ ok: false }, { status: 500 });
+    }
 
     return NextResponse.json({
-      items: (data ?? []).map((x) => ({
-        id: x.id,
-        productName: x.product_name,
-        verdict: x.verdict,
-        createdAt: x.created_at,
-      })),
+      ok: true,
+      history: data ?? [],
     });
-  } catch {
-    return NextResponse.json({ items: [] });
+  } catch (e) {
+    console.error(e);
+    return NextResponse.json({ ok: false }, { status: 500 });
   }
 }
