@@ -1,11 +1,12 @@
-import { cookies } from "next/headers";
 import crypto from "crypto";
+import { cookies } from "next/headers";
 
 const COOKIE_NAME = "gp_session";
+const ONE_YEAR = 60 * 60 * 24 * 365;
 
-// Next 16: cookies() 可能是 async（Vercel build/edge 环境会报你之前那个错）
 export async function getSessionKey(): Promise<string> {
   const jar = await cookies();
+
   let key = jar.get(COOKIE_NAME)?.value;
 
   if (!key) {
@@ -15,14 +16,14 @@ export async function getSessionKey(): Promise<string> {
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
       path: "/",
-      maxAge: 60 * 60 * 24 * 365,
+      maxAge: ONE_YEAR,
     });
   }
 
   return key;
 }
 
-// 兼容你代码里之前用过的名字：getOrCreateSessionId
+// 兼容旧 import（你项目里还有 getOrCreateSessionId）
 export async function getOrCreateSessionId(): Promise<string> {
   return getSessionKey();
 }

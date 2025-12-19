@@ -1,37 +1,57 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getSessionKey } from "@/lib/session";
-
-export const runtime = "nodejs";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export async function GET() {
   try {
-    const sessionKey = getSessionKey();
+    const sessionKey = await getSessionKey();
+    const supabase = supabaseAdmin();
 
-    const { data: session } = await supabaseAdmin
+    const { data: isProRow } = await supabase
       .from("gp_sessions")
-      .select("id")
+      .select("is_pro")
       .eq("session_key", sessionKey)
-      .single();
+      .maybeSingle();
 
-    if (!session) return NextResponse.json({ items: [] });
+    const isPro = Boolean(isProRow?.is_pro);
 
-    const { data } = await supabaseAdmin
-      .from("gp_scans")
-      .select("id,product_name,verdict,created_at")
-      .eq("session_id", session.id)
+    const { data, error } = await supabase
+      .from("gp_scan_history")
+      .select(
+        "id,created_at,product_name,score,notes_free,notes_pro,signals,session_key"
+      )
+      .eq("session_key", sessionKey)
       .order("created_at", { ascending: false })
-      .limit(30);
+      .limit(1);
+
+    if (error) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    }
+
+    const row = data?.[0] || null;
+
+    if (!row) {
+      return NextResponse.json({ ok: true, result: null, isPro });
+    }
 
     return NextResponse.json({
-      items: (data ?? []).map((x) => ({
-        id: x.id,
-        productName: x.product_name,
-        verdict: x.verdict,
-        createdAt: x.created_at,
-      })),
+      ok: true,
+      isPro,
+      result: {
+        id: row.id,
+        created_at: row.created_at,
+        product_name: row.product_name,
+        score: row.score,
+        notes_free: Array.isArray(row.notes_free) ? row.notes_free : [],
+        notes_pro: isPro && Array.isArray(row.notes_pro) ? row.notes_pro : [],
+        signals: row.signals ?? {},
+      },
     });
-  } catch {
-    return NextResponse.json({ items: [] });
+  } catch (e: any) {
+    console.error(e);
+    return NextResponse.json(
+      { ok: false, error: e?.message || "result_error" },
+      { status: 500 }
+    );
   }
 }
