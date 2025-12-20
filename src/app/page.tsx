@@ -4,65 +4,51 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 export default function HomePage() {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const ref = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
   async function upload(file: File) {
+    setLoading(true);
+    setErr(null);
     try {
-      setLoading(true);
-      setError(null);
-
       const fd = new FormData();
       fd.append("image", file);
 
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        body: fd,
-      });
+      const res = await fetch("/api/analyze", { method: "POST", body: fd });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j?.error || "analyze_failed");
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Analyze failed");
-
-      sessionStorage.setItem("lastResult", JSON.stringify(data.result));
       router.push("/result");
     } catch (e: any) {
-      setError(e.message);
+      setErr(e?.message || "error");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <main style={{ maxWidth: 420, margin: "0 auto", padding: 24 }}>
+    <main style={{ maxWidth: 520, margin: "48px auto", padding: 16 }}>
       <h1>Goodpick</h1>
-      <p style={{ color: "#666" }}>Scan food. Get a better pick.</p>
 
       <button
+        onClick={() => ref.current?.click()}
         disabled={loading}
-        onClick={() => inputRef.current?.click()}
-        style={{
-          width: "100%",
-          padding: 14,
-          marginTop: 24,
-          background: "#111",
-          color: "#fff",
-          borderRadius: 8,
-        }}
+        style={{ padding: 12, borderRadius: 10, border: "1px solid rgba(0,0,0,.2)" }}
       >
-        {loading ? "Analyzing…" : "Scan / Upload Photo"}
+        {loading ? "Analyzing..." : "Scan / Upload Photo"}
       </button>
 
       <input
-        ref={inputRef}
+        ref={ref}
         hidden
         type="file"
         accept="image/*"
-        onChange={(e) => e.target.files && upload(e.target.files[0])}
+        onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])}
       />
 
-      {error && <p style={{ color: "red", marginTop: 12 }}>{error}</p>}
+      {err ? <div style={{ color: "crimson", marginTop: 12 }}>{err}</div> : null}
     </main>
   );
 }

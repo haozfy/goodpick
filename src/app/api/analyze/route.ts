@@ -1,106 +1,80 @@
 import { NextResponse } from "next/server";
+import { supabaseServer } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-function j(data: any, status = 200) {
-  return NextResponse.json(data, { status });
-}
-
-async function fileToBase64DataUrl(file: File) {
+async function fileToDataUrl(file: File) {
   const buf = Buffer.from(await file.arrayBuffer());
   const mime = file.type || "image/jpeg";
   return `data:${mime};base64,${buf.toString("base64")}`;
 }
 
-export async function GET() {
-  return j({ error: "Method not allowed" }, 405);
-}
-
 export async function POST(req: Request) {
-  try {
-    const ct = req.headers.get("content-type") || "";
+  const supabase = supabaseServer();
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
 
-    // ✅ 1) 支持 JSON 测试请求（不会 500）
-    if (ct.includes("application/json")) {
-      const body = await req.json().catch(() => ({}));
-      return j({
-        ok: true,
-        mode: "json",
-        echo: body,
-        result: {
-          product_name: "Test Food",
-          score: 72,
-          notes_free: ["Moderate sugar"],
-          notes_pro: ["Could be better"],
-          signals: { sugar: "medium" },
+  const form = await req.formData();
+  const file = form.get("image");
+  if (!(file instanceof File)) return NextResponse.json({ ok: false, error: "missing_image" }, { status: 400 });
+
+  const imageUrl = await fileToDataUrl(file);
+
+  const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY!}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      temperature: 0.2,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content:
+            'Return STRICT JSON: { "product_name": string, "score": int 0-100, "headline": string, "notes_free": string[], "notes_pro": string[], "signals": object }',
         },
-      });
-    }
-
-    // ✅ 2) 支持图片上传（FormData）
-    if (ct.includes("multipart/form-data")) {
-      const form = await req.formData();
-      const file = form.get("image");
-      if (!(file instanceof File)) return j({ error: "Missing image" }, 400);
-
-      const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-
-      // 没有 key 就返回 mock，确保本地先跑通
-      if (!OPENAI_API_KEY) {
-        return j({
-          ok: true,
-          mode: "mock",
-          result: {
-            product_name: "Sample Food",
-            score: 70,
-            notes_free: ["Moderate sugar"],
-            notes_pro: ["Check sodium and additives"],
-            signals: { sugar: "medium" },
-          },
-        });
-      }
-
-      const imageUrl = await fileToBase64DataUrl(file);
-
-      const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          temperature: 0.2,
-          response_format: { type: "json_object" },
-          messages: [
-            {
-              role: "system",
-              content:
-                'You are a food label analyzer. Return STRICT JSON with keys: product_name (string), score (0-100 int), notes_free (string[]), notes_pro (string[]), signals (object).',
-            },
-            {
-              role: "user",
-              content: [
-                { type: "text", text: "Analyze this label. Keep it short and actionable." },
-                { type: "image_url", image_url: { url: imageUrl } },
-              ],
-            },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Analyze label. Be short, actionable." },
+            { type: "image_url", image_url: { url: imageUrl } },
           ],
-        }),
-      });
+        },
+      ],
+    }),
+  });
 
-      const text = await resp.text();
-      if (!resp.ok) return j({ error: "OpenAI error", detail: text }, 500);
-
-      const payload = JSON.parse(text);
-      const content = payload?.choices?.[0]?.message?.content ?? "{}";
-      const result = JSON.parse(content);
-
-      return j({ ok: true, mode: "openai", result });
-    }
-
-    return j({ error: "Unsupported content-type", contentType: ct }, 415);
-  } catch (e: any) {
-    return j({ error: "Analyze failed", detail: String(e?.message || e) }, 500);
+  if (!r.ok) {
+    const t = await r.text();
+    return NextResponse.json({ ok: false, error: "openai_error", detail: t }, { status: 500 });
   }
+
+  const payload = await r.json();
+  const content = payload?.choices?.[0]?.message?.content ?? "{}";
+  const out = JSON.parse(content);
+
+  const score = Number(out.score ?? 70);
+  const verdict = score >= 80 ? "GOOD" : score >= 60 ? "CAUTION" : "SKIP";
+
+  const { data: row, error } = await supabase
+    .from("gp_scan_history")
+    .insert({
+      user_id: auth.user.id,
+      product_name: out.product_name ?? "Food",
+      score,
+      verdict,
+      headline: out.headline ?? "",
+      notes_free: out.notes_free ?? [],
+      notes_pro: out.notes_pro ?? [],
+      signals: out.signals ?? {},
+    })
+    .select("id")
+    .single();
+
+  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+
+  return NextResponse.json({ ok: true, id: row.id });
 }
