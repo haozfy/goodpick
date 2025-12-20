@@ -1,105 +1,44 @@
-"use client";
-
-import { useEffect, useState } from "react";
-import { canUseFreeTrial, consumeFreeTrial, getTrialLeft } from "@/lib/trial";
-import { getUser } from "@/lib/supabase/auth";
-type AnalyzeResult = {
-  title?: string;
-  score?: number;
-  summary?: string;
-  tips?: string[];
-};
+// src/app/page.tsx
+import Link from "next/link";
 
 export default function HomePage() {
-  const [url, setUrl] = useState("");
-  const [left, setLeft] = useState(0);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    setLeft(getTrialLeft());
-    (async () => {
-      const u = await getUser();
-      setUserEmail(u?.email ?? null);
-    })();
-  }, []);
-
-  async function onAnalyze() {
-    setErr(null);
-
-    // ✅ 已登录：不走试用限制（你也可以改成“登录后再给 3 次”，但先按最简单）
-    const u = await getUser();
-    if (!u) {
-      // ✅ 未登录：先走免费次数
-      if (!canUseFreeTrial()) {
-        window.location.href = "/login";
-        return;
-      }
-      consumeFreeTrial();
-      setLeft(getTrialLeft());
-    }
-
-    setLoading(true);
-    try {
-      // 你如果已有 /api/analyze，就保持这个接口
-      const r = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url }),
-      });
-      if (!r.ok) throw new Error(`Analyze failed: ${r.status}`);
-      const data = (await r.json()) as AnalyzeResult;
-
-      // ✅ 结果放 localStorage，result 页直接读，不需要 cookie / session
-      localStorage.setItem("goodpick_last_result_v1", JSON.stringify({ input: url, data, t: Date.now() }));
-      window.location.href = "/result";
-    } catch (e: any) {
-      setErr(e?.message ?? "Unknown error");
-    } finally {
-      setLoading(false);
-    }
-  }
-
   return (
-    <div style={{ maxWidth: 720, margin: "60px auto", padding: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h1 style={{ fontSize: 28, fontWeight: 800 }}>Goodpick</h1>
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          {userEmail ? (
-            <>
-              <span style={{ fontSize: 13, opacity: 0.7 }}>{userEmail}</span>
-              <a href="/logout">Logout</a>
-            </>
-          ) : (
-            <a href="/login">Login</a>
-          )}
+    <main className="min-h-screen bg-white">
+      {/* Top bar */}
+      <header className="mx-auto flex w-full max-w-3xl items-center justify-between px-6 py-6">
+        <div>
+          <div className="text-sm font-semibold">Goodpick</div>
+          <div className="text-xs text-neutral-500">Scan food. Get a better pick.</div>
         </div>
-      </div>
 
-      {!userEmail && (
-        <div style={{ marginTop: 10, fontSize: 13, opacity: 0.75 }}>
-          免费试用剩余：<b>{left}</b>/3
+        <nav className="flex items-center gap-5 text-sm">
+          <Link className="text-neutral-700 hover:text-black" href="/history">
+            History
+          </Link>
+          <Link className="text-neutral-700 hover:text-black" href="/login">
+            Login
+          </Link>
+        </nav>
+      </header>
+
+      {/* Center */}
+      <section className="mx-auto mt-10 w-full max-w-3xl px-6">
+        <h1 className="text-4xl font-semibold tracking-tight">Goodpick</h1>
+
+        <div className="mt-8 flex w-full max-w-xl items-center gap-3">
+          <input
+            className="h-11 flex-1 rounded-xl border border-neutral-200 bg-white px-4 text-sm outline-none focus:border-neutral-400"
+            placeholder="Paste product URL / barcode…"
+          />
+          <button className="h-11 rounded-xl border border-neutral-200 px-4 text-sm hover:border-neutral-400">
+            Analyze
+          </button>
         </div>
-      )}
 
-      <div style={{ marginTop: 18, display: "flex", gap: 10 }}>
-        <input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="Paste product URL / barcode page / anything"
-          style={{ flex: 1, padding: 12, borderRadius: 10, border: "1px solid #ddd" }}
-        />
-        <button
-          onClick={onAnalyze}
-          disabled={!url || loading}
-          style={{ padding: "12px 16px", borderRadius: 10, border: "1px solid #ddd" }}
-        >
-          {loading ? "Analyzing..." : "Analyze"}
-        </button>
-      </div>
-
-      {err && <div style={{ marginTop: 12, color: "crimson" }}>{err}</div>}
-    </div>
+        <p className="mt-10 text-center text-xs text-neutral-400">
+          Not medical advice. For decision support only.
+        </p>
+      </section>
+    </main>
   );
 }
