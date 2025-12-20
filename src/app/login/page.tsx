@@ -1,55 +1,89 @@
-// src/app/login/page.tsx
 "use client";
 
 import { useState } from "react";
-import { supabaseBrowser } from "@/lib/supabase/browser";
+import { supabase } from "@/lib/supabase/client";
 
 export default function LoginPage() {
-  const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const signInGoogle = async () => {
-    try {
-      setLoading(true);
-      const supabase = supabaseBrowser();
-      const origin = window.location.origin;
+  const signInWithGoogle = async () => {
+    setBusy(true);
+    setMsg(null);
+    const origin = window.location.origin;
 
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          // 这里要与你在 Supabase/Google 配的回调一致（你现在就是这个）
-          redirectTo: `${origin}/auth/callback`,
-        },
-      });
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${origin}/auth/callback`,
+      },
+    });
 
-      if (error) throw error;
-    } catch (e: any) {
-      alert(e?.message ?? "Login failed");
-      setLoading(false);
-    }
+    if (error) setMsg(error.message);
+    setBusy(false);
+  };
+
+  const signInWithEmail = async () => {
+    setBusy(true);
+    setMsg(null);
+
+    const origin = window.location.origin;
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: `${origin}/auth/callback`,
+      },
+    });
+
+    if (error) setMsg(error.message);
+    else setMsg("Magic link sent. Check your email.");
+    setBusy(false);
   };
 
   return (
-    <main style={{ maxWidth: 420, margin: "80px auto", padding: 16 }}>
-      <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 12 }}>Login</h1>
-      <p style={{ opacity: 0.7, marginBottom: 18 }}>
+    <div className="mx-auto max-w-md">
+      <h1 className="text-3xl font-semibold">Login</h1>
+      <p className="mt-2 text-sm text-neutral-500">
         Sign in to sync your history across devices.
       </p>
 
-      <button
-        onClick={signInGoogle}
-        disabled={loading}
-        style={{
-          width: "100%",
-          height: 44,
-          borderRadius: 10,
-          border: "1px solid #ddd",
-          background: "white",
-          fontWeight: 600,
-          cursor: loading ? "not-allowed" : "pointer",
-        }}
-      >
-        {loading ? "Redirecting..." : "Continue with Google"}
-      </button>
-    </main>
+      <div className="mt-6 space-y-3">
+        <button
+          onClick={signInWithGoogle}
+          disabled={busy}
+          className="h-12 w-full rounded-xl border border-neutral-200 text-sm font-medium hover:border-neutral-400 disabled:opacity-40"
+        >
+          Continue with Google
+        </button>
+
+        <div className="flex items-center gap-3 py-2">
+          <div className="h-px flex-1 bg-neutral-200" />
+          <div className="text-xs text-neutral-400">or</div>
+          <div className="h-px flex-1 bg-neutral-200" />
+        </div>
+
+        <div className="space-y-2">
+          <input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Email address"
+            className="h-12 w-full rounded-xl border border-neutral-200 px-4 text-sm outline-none focus:border-neutral-400"
+          />
+          <button
+            onClick={signInWithEmail}
+            disabled={busy || !email}
+            className="h-12 w-full rounded-xl bg-black text-sm font-medium text-white disabled:opacity-40"
+          >
+            Continue with Email
+          </button>
+          <div className="text-xs text-neutral-500">
+            We’ll send you a magic link. No password needed.
+          </div>
+        </div>
+
+        {msg && <div className="text-sm text-neutral-700">{msg}</div>}
+      </div>
+    </div>
   );
 }
