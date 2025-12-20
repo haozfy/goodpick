@@ -1,13 +1,13 @@
+// src/lib/supabase/browser.ts
 import { createClient } from "@supabase/supabase-js";
-import { mustEnv } from "@/lib/env";
 
 export const supabaseBrowser = () =>
   createClient(
-    mustEnv("NEXT_PUBLIC_SUPABASE_URL"),
-    mustEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       auth: {
-        persistSession: true, // 存 localStorage，不用 cookie
+        persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
       },
