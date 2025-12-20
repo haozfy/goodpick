@@ -1,85 +1,92 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
-type Stored = {
-  input: string;
-  data: {
-    title?: string;
-    score?: number;
-    summary?: string;
-    tips?: string[];
-  };
-  t: number;
+type Result = {
+  score?: number;
+  label?: string;
+  negatives?: { name: string; valueText?: string; hint?: string; level?: "low" | "mid" | "high" }[];
+  positives?: { name: string; valueText?: string; hint?: string }[];
 };
 
+function pill(level?: string) {
+  if (level === "low") return "bg-green-100 text-green-700";
+  if (level === "mid") return "bg-orange-100 text-orange-700";
+  if (level === "high") return "bg-red-100 text-red-700";
+  return "bg-neutral-100 text-neutral-700";
+}
+
 export default function ResultPage() {
-  const [item, setItem] = useState<Stored | null>(null);
+  const [data, setData] = useState<Result | null>(null);
 
   useEffect(() => {
-    const raw = localStorage.getItem("goodpick_last_result_v1");
-    if (!raw) return;
-    try {
-      setItem(JSON.parse(raw));
-    } catch {}
+    const raw = sessionStorage.getItem("gp_last_result");
+    if (raw) setData(JSON.parse(raw));
   }, []);
 
-  if (!item) {
+  const label = useMemo(() => data?.label || (data?.score != null ? `${data.score}/100` : "Result"), [data]);
+
+  if (!data) {
     return (
-      <div style={{ maxWidth: 720, margin: "60px auto", padding: 16 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 800 }}>Result</h1>
-        <p style={{ marginTop: 12, opacity: 0.7 }}>没有找到结果。回首页先跑一次分析。</p>
-        <a href="/">Back</a>
-      </div>
+      <main className="space-y-4">
+        <div className="rounded-2xl border border-neutral-200 p-4">
+          <div className="text-sm text-neutral-600">No result yet.</div>
+          <Link className="mt-3 inline-block text-sm text-black underline" href="/">
+            Go back
+          </Link>
+        </div>
+      </main>
     );
   }
 
-  const { input, data } = item;
-
   return (
-    <div style={{ maxWidth: 720, margin: "60px auto", padding: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h1 style={{ fontSize: 22, fontWeight: 800 }}>Result</h1>
-        <a href="/">New</a>
-      </div>
+    <main className="space-y-4">
+      <section className="rounded-2xl border border-neutral-200 p-4 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-semibold">{label}</div>
+          {data.score != null && <div className="text-sm text-neutral-500">{data.score}/100</div>}
+        </div>
+      </section>
 
-      <div style={{ marginTop: 12, fontSize: 13, opacity: 0.7 }}>Input: {input}</div>
+      <section className="rounded-2xl border border-neutral-200 p-4 shadow-sm">
+        <div className="mb-2 text-sm font-semibold">Negatives</div>
+        <div className="space-y-3">
+          {(data.negatives || []).map((n, i) => (
+            <div key={i} className="rounded-xl border border-neutral-200 p-3">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-medium">{n.name}</div>
+                <span className={`rounded-full px-2 py-0.5 text-[11px] ${pill(n.level)}`}>
+                  {(n.level || "mid").toUpperCase()}
+                </span>
+              </div>
+              {n.hint && <div className="mt-1 text-xs text-neutral-500">{n.hint}</div>}
+              {n.valueText && <div className="mt-2 text-xs text-neutral-600">{n.valueText}</div>}
+            </div>
+          ))}
+          {(data.negatives || []).length === 0 && <div className="text-sm text-neutral-500">None</div>}
+        </div>
+      </section>
 
-      <div style={{ marginTop: 18, padding: 16, border: "1px solid #eee", borderRadius: 12 }}>
-        <div style={{ fontSize: 18, fontWeight: 800 }}>{data.title ?? "Untitled"}</div>
-        {typeof data.score === "number" && (
-          <div style={{ marginTop: 6, fontSize: 14 }}>
-            Score: <b>{data.score}</b>
-          </div>
-        )}
-        {data.summary && <p style={{ marginTop: 10, lineHeight: 1.6 }}>{data.summary}</p>}
-        {data.tips?.length ? (
-          <ul style={{ marginTop: 10, paddingLeft: 18 }}>
-            {data.tips.map((t, i) => (
-              <li key={i} style={{ marginTop: 6 }}>
-                {t}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </div>
+      <section className="rounded-2xl border border-neutral-200 p-4 shadow-sm">
+        <div className="mb-2 text-sm font-semibold">Positives</div>
+        <div className="space-y-3">
+          {(data.positives || []).map((p, i) => (
+            <div key={i} className="rounded-xl border border-neutral-200 p-3">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-medium">{p.name}</div>
+                {p.valueText && <div className="text-xs text-neutral-600">{p.valueText}</div>}
+              </div>
+              {p.hint && <div className="mt-1 text-xs text-neutral-500">{p.hint}</div>}
+            </div>
+          ))}
+          {(data.positives || []).length === 0 && <div className="text-sm text-neutral-500">None</div>}
+        </div>
+      </section>
 
-      <div style={{ marginTop: 18, display: "flex", gap: 10 }}>
-        <a
-          href="/"
-          style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #ddd", display: "inline-block" }}
-        >
-          Back
-        </a>
-
-        {/* 你有 Stripe 的话：把 /checkout 接上 */}
-        <a
-          href="/checkout"
-          style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #ddd", display: "inline-block" }}
-        >
-          Upgrade (Pro)
-        </a>
-      </div>
-    </div>
+      <Link className="block text-center text-sm text-black underline" href="/">
+        Scan another
+      </Link>
+    </main>
   );
 }
