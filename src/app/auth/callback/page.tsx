@@ -1,29 +1,43 @@
 // src/app/auth/callback/page.tsx
-"use client";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { createServerClient } from "@supabase/ssr";
 
-import { useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+export const runtime = "nodejs";
 
-export default function AuthCallbackPage() {
-  const router = useRouter();
-  const sp = useSearchParams();
+export default async function AuthCallbackPage({
+  searchParams,
+}: {
+  searchParams: { code?: string; next?: string };
+}) {
+  const code = searchParams.code;
+  const next = searchParams.next ?? "/";
 
-  useEffect(() => {
-    // Supabase OAuth 会把 code 带回到这里
-    // 你想回到哪里，就用 next=xxx（比如 /history）
-    const next = sp.get("next") || "/";
+  if (!code) redirect("/login?error=missing_code");
 
-    // 给一点点时间让 supabase-js 在客户端完成 session 写入（如果你有在别处做 exchange）
-    // 你的项目如果已经有 /auth/callback route.ts 做 exchange，这里直接跳转即可
-    router.replace(next);
-  }, [router, sp]);
+  const cookieStore = cookies();
 
-  return (
-    <main className="mx-auto w-full max-w-3xl px-6 py-16">
-      <div className="rounded-2xl border border-neutral-200 bg-white p-6">
-        <div className="text-sm font-semibold">Signing you in…</div>
-        <div className="mt-2 text-sm text-neutral-500">Please wait.</div>
-      </div>
-    </main>
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name) {
+          return cookieStore.get(name)?.value;
+        },
+        set(name, value, options) {
+          cookieStore.set({ name, value, ...options });
+        },
+        remove(name, options) {
+          cookieStore.set({ name, value: "", ...options });
+        },
+      },
+    }
   );
+
+  const { error } = await supabase.auth.exchangeCodeForSession(code);
+
+  if (error) redirect(`/login?error=${encodeURIComponent(error.message)}`);
+
+  redirect(next);
 }
