@@ -1,24 +1,30 @@
-// src/app/auth/callback/route.ts
-import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+// src/app/history/page.tsx
+"use client";
 
-export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const code = url.searchParams.get("code");
+import { useEffect, useState } from "react";
+import { supabaseBrowser } from "@/lib/supabase/browser";
 
-  // 没带 code 就回首页
-  if (!code) return NextResponse.redirect(new URL("/", url.origin));
+export default function HistoryPage() {
+  const [email, setEmail] = useState<string | null>(null);
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  useEffect(() => {
+    const supabase = supabaseBrowser();
+    supabase.auth.getUser().then(({ data }) => {
+      setEmail(data.user?.email ?? null);
+    });
+  }, []);
+
+  return (
+    <main style={{ maxWidth: 720, margin: "60px auto", padding: 16 }}>
+      <h1 style={{ fontSize: 26, fontWeight: 700 }}>History</h1>
+
+      <p style={{ opacity: 0.7, marginTop: 8 }}>
+        {email ? `Logged in as ${email}` : "Not logged in"}
+      </p>
+
+      <div style={{ marginTop: 24, opacity: 0.6 }}>
+        History list coming soon.
+      </div>
+    </main>
   );
-
-  // 用 code 换 session（浏览器端会自动存）
-  const { error } = await supabase.auth.exchangeCodeForSession(code);
-  if (error) {
-    return NextResponse.redirect(new URL("/login?error=oauth", url.origin));
-  }
-
-  return NextResponse.redirect(new URL("/", url.origin));
 }
