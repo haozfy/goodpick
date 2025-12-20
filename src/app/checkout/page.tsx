@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getUser } from "@/lib/auth";
+import { getUser } from "@/lib/supabase/auth";
 
 export default function CheckoutPage() {
   const [loading, setLoading] = useState(false);

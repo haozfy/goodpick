@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { canUseFreeTrial, consumeFreeTrial, getTrialLeft } from "@/lib/trial";
-import { getUser } from "@/lib/auth";
-
+import { getUser } from "@/lib/supabase/auth";
 type AnalyzeResult = {
   title?: string;
   score?: number;

@@ -1,4 +1,4 @@
-// src/lib/auth.ts
+// src/lib/supabase/auth.ts
 export type AppUser = {
   id: string;
   email?: string | null;
