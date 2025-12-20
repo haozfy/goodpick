@@ -14,7 +14,11 @@ export async function POST(req: Request) {
 
   let event: Stripe.Event;
   try {
-    event = stripe.webhooks.constructEvent(body, sig!, process.env.STRIPE_WEBHOOK_SECRET!);
+    event = stripe.webhooks.constructEvent(
+      body,
+      sig!,
+      process.env.STRIPE_WEBHOOK_SECRET!
+    );
   } catch {
     return NextResponse.json({ ok: false }, { status: 400 });
   }
@@ -30,26 +34,43 @@ export async function POST(req: Request) {
 
   if (event.type === "checkout.session.completed") {
     const s = event.data.object as Stripe.Checkout.Session;
-    const userId = (s.metadata?.user_id || s.client_reference_id) as string | undefined;
+    const userId = (s.metadata?.user_id || s.client_reference_id) as
+      | string
+      | undefined;
+
     if (userId) {
       await upsertSub(userId, {
         is_pro: true,
         stripe_customer_id: typeof s.customer === "string" ? s.customer : null,
-        stripe_subscription_id: typeof s.subscription === "string" ? s.subscription : null,
+        stripe_subscription_id:
+          typeof s.subscription === "string" ? s.subscription : null,
       });
     }
   }
 
-  if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
+  if (
+    event.type === "customer.subscription.updated" ||
+    event.type === "customer.subscription.deleted"
+  ) {
     const sub = event.data.object as Stripe.Subscription;
     const userId = sub.metadata?.user_id;
+
     if (userId) {
       const active = sub.status === "active" || sub.status === "trialing";
+
+      // ✅ 兼容拿 period end：优先 item-level，其次 root-level，最后 null
+      const periodEndUnix =
+        (sub.items?.data?.[0] as any)?.current_period_end ??
+        (sub as any).current_period_end ??
+        null;
+
       await upsertSub(userId, {
         is_pro: active,
         stripe_subscription_id: sub.id,
-        stripe_price_id: sub.items.data?.[0]?.price?.id ?? null,
-        current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+        stripe_price_id: sub.items?.data?.[0]?.price?.id ?? null,
+        current_period_end: periodEndUnix
+          ? new Date(periodEndUnix * 1000).toISOString()
+          : null,
       });
     }
   }
