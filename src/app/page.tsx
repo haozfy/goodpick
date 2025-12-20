@@ -1,54 +1,106 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { canUseFreeTrial, consumeFreeTrial, getTrialLeft } from "@/lib/trial";
+import { getUser } from "@/lib/auth";
+
+type AnalyzeResult = {
+  title?: string;
+  score?: number;
+  summary?: string;
+  tips?: string[];
+};
 
 export default function HomePage() {
-  const ref = useRef<HTMLInputElement>(null);
-  const router = useRouter();
+  const [url, setUrl] = useState("");
+  const [left, setLeft] = useState(0);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function upload(file: File) {
-    setLoading(true);
+  useEffect(() => {
+    setLeft(getTrialLeft());
+    (async () => {
+      const u = await getUser();
+      setUserEmail(u?.email ?? null);
+    })();
+  }, []);
+
+  async function onAnalyze() {
     setErr(null);
+
+    // ✅ 已登录：不走试用限制（你也可以改成“登录后再给 3 次”，但先按最简单）
+    const u = await getUser();
+    if (!u) {
+      // ✅ 未登录：先走免费次数
+      if (!canUseFreeTrial()) {
+        window.location.href = "/login";
+        return;
+      }
+      consumeFreeTrial();
+      setLeft(getTrialLeft());
+    }
+
+    setLoading(true);
     try {
-      const fd = new FormData();
-      fd.append("image", file);
+      // 你如果已有 /api/analyze，就保持这个接口
+      const r = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      if (!r.ok) throw new Error(`Analyze failed: ${r.status}`);
+      const data = (await r.json()) as AnalyzeResult;
 
-      const res = await fetch("/api/analyze", { method: "POST", body: fd });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j?.error || "analyze_failed");
-
-      router.push("/result");
+      // ✅ 结果放 localStorage，result 页直接读，不需要 cookie / session
+      localStorage.setItem("goodpick_last_result_v1", JSON.stringify({ input: url, data, t: Date.now() }));
+      window.location.href = "/result";
     } catch (e: any) {
-      setErr(e?.message || "error");
+      setErr(e?.message ?? "Unknown error");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <main style={{ maxWidth: 520, margin: "48px auto", padding: 16 }}>
-      <h1>Goodpick</h1>
+    <div style={{ maxWidth: 720, margin: "60px auto", padding: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h1 style={{ fontSize: 28, fontWeight: 800 }}>Goodpick</h1>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          {userEmail ? (
+            <>
+              <span style={{ fontSize: 13, opacity: 0.7 }}>{userEmail}</span>
+              <a href="/logout">Logout</a>
+            </>
+          ) : (
+            <a href="/login">Login</a>
+          )}
+        </div>
+      </div>
 
-      <button
-        onClick={() => ref.current?.click()}
-        disabled={loading}
-        style={{ padding: 12, borderRadius: 10, border: "1px solid rgba(0,0,0,.2)" }}
-      >
-        {loading ? "Analyzing..." : "Scan / Upload Photo"}
-      </button>
+      {!userEmail && (
+        <div style={{ marginTop: 10, fontSize: 13, opacity: 0.75 }}>
+          免费试用剩余：<b>{left}</b>/3
+        </div>
+      )}
 
-      <input
-        ref={ref}
-        hidden
-        type="file"
-        accept="image/*"
-        onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])}
-      />
+      <div style={{ marginTop: 18, display: "flex", gap: 10 }}>
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="Paste product URL / barcode page / anything"
+          style={{ flex: 1, padding: 12, borderRadius: 10, border: "1px solid #ddd" }}
+        />
+        <button
+          onClick={onAnalyze}
+          disabled={!url || loading}
+          style={{ padding: "12px 16px", borderRadius: 10, border: "1px solid #ddd" }}
+        >
+          {loading ? "Analyzing..." : "Analyze"}
+        </button>
+      </div>
 
-      {err ? <div style={{ color: "crimson", marginTop: 12 }}>{err}</div> : null}
-    </main>
+      {err && <div style={{ marginTop: 12, color: "crimson" }}>{err}</div>}
+    </div>
   );
 }

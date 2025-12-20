@@ -1,81 +1,85 @@
-import Link from "next/link";
-import { supabaseServer } from "@/lib/supabase/server";
+"use client";
 
-export default async function ResultPage() {
-  const supabase = supabaseServer();
-  const { data: auth } = await supabase.auth.getUser();
+import { useEffect, useState } from "react";
 
-  if (!auth.user) {
+type Stored = {
+  input: string;
+  data: {
+    title?: string;
+    score?: number;
+    summary?: string;
+    tips?: string[];
+  };
+  t: number;
+};
+
+export default function ResultPage() {
+  const [item, setItem] = useState<Stored | null>(null);
+
+  useEffect(() => {
+    const raw = localStorage.getItem("goodpick_last_result_v1");
+    if (!raw) return;
+    try {
+      setItem(JSON.parse(raw));
+    } catch {}
+  }, []);
+
+  if (!item) {
     return (
-      <main style={{ maxWidth: 560, margin: "48px auto", padding: 16 }}>
-        <h1>Login required</h1>
-        <Link href="/login">Go login</Link>
-      </main>
+      <div style={{ maxWidth: 720, margin: "60px auto", padding: 16 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 800 }}>Result</h1>
+        <p style={{ marginTop: 12, opacity: 0.7 }}>没有找到结果。回首页先跑一次分析。</p>
+        <a href="/">Back</a>
+      </div>
     );
   }
 
-  const { data, error } = await supabase
-    .from("gp_scan_history")
-    .select("product_name,score,verdict,headline,notes_free,notes_pro,created_at")
-    .eq("user_id", auth.user.id)
-    .order("created_at", { ascending: false })
-    .limit(1);
-
-  const row = data?.[0];
-
-  if (error || !row) {
-    return (
-      <main style={{ maxWidth: 560, margin: "48px auto", padding: 16 }}>
-        <h1>No result yet</h1>
-        <Link href="/">Scan</Link>
-      </main>
-    );
-  }
+  const { input, data } = item;
 
   return (
-    <main style={{ maxWidth: 560, margin: "48px auto", padding: 16 }}>
-      <header style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-        <div>
-          <h1 style={{ margin: 0 }}>{row.product_name || "Result"}</h1>
-          <div style={{ opacity: 0.65, marginTop: 6 }}>
-            {new Date(row.created_at).toLocaleString()}
-          </div>
-        </div>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 44, fontWeight: 900, lineHeight: 1 }}>{row.score ?? 0}</div>
-          <div style={{ opacity: 0.65, marginTop: 6 }}>{row.verdict}</div>
-        </div>
-      </header>
-
-      <section style={{ marginTop: 18 }}>
-        <h3 style={{ marginBottom: 8 }}>Headline</h3>
-        <div style={{ opacity: 0.85 }}>{row.headline || "-"}</div>
-      </section>
-
-      <section style={{ marginTop: 18 }}>
-        <h3 style={{ marginBottom: 8 }}>Why</h3>
-        <ul style={{ paddingLeft: 18, margin: 0 }}>
-          {(row.notes_free ?? []).map((x: string) => (
-            <li key={x} style={{ marginBottom: 6 }}>{x}</li>
-          ))}
-        </ul>
-      </section>
-
-      <section style={{ marginTop: 18 }}>
-        <h3 style={{ marginBottom: 8 }}>Pro insights</h3>
-        <ul style={{ paddingLeft: 18, margin: 0 }}>
-          {(row.notes_pro ?? []).map((x: string) => (
-            <li key={x} style={{ marginBottom: 6 }}>{x}</li>
-          ))}
-        </ul>
-      </section>
-
-      <div style={{ display: "flex", gap: 12, marginTop: 22 }}>
-        <Link href="/">Scan again</Link>
-        <Link href="/history">History</Link>
-        <Link href="/pro">Pro</Link>
-        <Link href="/logout">Logout</Link>
+    <div style={{ maxWidth: 720, margin: "60px auto", padding: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h1 style={{ fontSize: 22, fontWeight: 800 }}>Result</h1>
+        <a href="/">New</a>
       </div>
-    </main>
+
+      <div style={{ marginTop: 12, fontSize: 13, opacity: 0.7 }}>Input: {input}</div>
+
+      <div style={{ marginTop: 18, padding: 16, border: "1px solid #eee", borderRadius: 12 }}>
+        <div style={{ fontSize: 18, fontWeight: 800 }}>{data.title ?? "Untitled"}</div>
+        {typeof data.score === "number" && (
+          <div style={{ marginTop: 6, fontSize: 14 }}>
+            Score: <b>{data.score}</b>
+          </div>
+        )}
+        {data.summary && <p style={{ marginTop: 10, lineHeight: 1.6 }}>{data.summary}</p>}
+        {data.tips?.length ? (
+          <ul style={{ marginTop: 10, paddingLeft: 18 }}>
+            {data.tips.map((t, i) => (
+              <li key={i} style={{ marginTop: 6 }}>
+                {t}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+
+      <div style={{ marginTop: 18, display: "flex", gap: 10 }}>
+        <a
+          href="/"
+          style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #ddd", display: "inline-block" }}
+        >
+          Back
+        </a>
+
+        {/* 你有 Stripe 的话：把 /checkout 接上 */}
+        <a
+          href="/checkout"
+          style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #ddd", display: "inline-block" }}
+        >
+          Upgrade (Pro)
+        </a>
+      </div>
+    </div>
   );
 }
