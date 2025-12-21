@@ -1,60 +1,41 @@
-// src/app/api/stripe/checkout/route.ts
 import { NextResponse } from "next/server";
-import { stripe } from "@/lib/stripe";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function POST() {
   const supabase = supabaseServer();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) return NextResponse.json({ ok: false }, { status: 401 });
+  if (!user) {
+    return NextResponse.json({ ok: false, reason: "login_required" }, { status: 401 });
+  }
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL!;
-  const priceId = process.env.STRIPE_PRICE_ID_PRO!;
   const svc = supabaseAdmin();
 
-  // 取 stripe customer
   const { data: ent } = await svc
     .from("user_entitlements")
-    .select("stripe_customer_id")
+    .select("plan, scans_used, scans_limit")
     .eq("user_id", user.id)
     .single();
 
-  let customerId = ent?.stripe_customer_id ?? null;
+  const plan = ent?.plan ?? "free";
+  const used = ent?.scans_used ?? 0;
+  const limit = ent?.scans_limit ?? 3;
 
-  if (!customerId) {
-    const customer = await stripe.customers.create({
-      email: user.email ?? undefined,
-      metadata: { user_id: user.id },
-    });
-    customerId = customer.id;
-
+  // ✅ Pro 无限：直接放行，不扣次数
+  if (plan !== "pro") {
+    if (used >= limit) {
+      return NextResponse.json({ ok: false, reason: "upgrade_required" }, { status: 402 });
+    }
     await svc
       .from("user_entitlements")
-      .update({
-        stripe_customer_id: customerId,
-        updated_at: new Date().toISOString(),
-      })
+      .update({ scans_used: used + 1, updated_at: new Date().toISOString() })
       .eq("user_id", user.id);
   }
 
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    customer: customerId,
-    line_items: [{ price: priceId, quantity: 1 }],
-    success_url: `${siteUrl}/?paid=1`,
-    cancel_url: `${siteUrl}/?canceled=1`,
-    allow_promotion_codes: true,
-
-    // 关键：把 user_id 写进 metadata，webhook 才能回写 pro
-    subscription_data: { metadata: { user_id: user.id } },
-    metadata: { user_id: user.id },
-  });
-
-  return NextResponse.json({ ok: true, url: session.url });
+  const result = { score: 62, label: "Good", negatives: [], positives: [] };
+  return NextResponse.json({ ok: true, result });
 }

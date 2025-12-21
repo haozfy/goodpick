@@ -1,75 +1,53 @@
-// src/app/api/stripe/webhook/route.ts
 import { NextResponse } from "next/server";
-import Stripe from "stripe";
 import { stripe } from "@/lib/stripe";
+import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-// Stripe webhook 必须用 raw text
-export async function POST(req: Request) {
-  const sig = req.headers.get("stripe-signature");
-  if (!sig) return NextResponse.json({ ok: false }, { status: 400 });
+export async function POST() {
+  const supabase = supabaseServer();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ ok: false }, { status: 401 });
 
-  const body = await req.text();
-
-  let event: Stripe.Event;
-  try {
-    event = stripe.webhooks.constructEvent(
-      body,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET!
-    );
-  } catch {
-    return NextResponse.json({ ok: false }, { status: 400 });
-  }
-
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL!;
+  const priceId = process.env.STRIPE_PRICE_ID_PRO!;
   const svc = supabaseAdmin();
 
-  // checkout 完成：升 Pro
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object as Stripe.Checkout.Session;
-    const userId = (session.metadata?.user_id ?? null) as string | null;
+  const { data: ent } = await svc
+    .from("user_entitlements")
+    .select("stripe_customer_id")
+    .eq("user_id", user.id)
+    .single();
 
-    if (userId && session.customer && session.subscription) {
-      await svc
-        .from("user_entitlements")
-        .update({
-          plan: "pro",
-          scans_limit: 999999999,
-          stripe_customer_id: String(session.customer),
-          stripe_subscription_id: String(session.subscription),
-          stripe_subscription_status: "active",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("user_id", userId);
-    }
+  let customerId = ent?.stripe_customer_id ?? null;
+
+  if (!customerId) {
+    const customer = await stripe.customers.create({
+      email: user.email ?? undefined,
+      metadata: { user_id: user.id },
+    });
+    customerId = customer.id;
+
+    // 如果你的 user_entitlements 行可能不存在，建议用 upsert
+    await svc.from("user_entitlements").upsert({
+      user_id: user.id,
+      stripe_customer_id: customerId,
+      updated_at: new Date().toISOString(),
+    });
   }
 
-  // 订阅更新/取消：active/trialing => pro，否则 free
-  if (
-    event.type === "customer.subscription.updated" ||
-    event.type === "customer.subscription.deleted"
-  ) {
-    const sub = event.data.object as Stripe.Subscription;
-    const userId = (sub.metadata?.user_id ?? null) as string | null;
-    const status = sub.status;
+  const session = await stripe.checkout.sessions.create({
+    mode: "subscription",
+    customer: customerId,
+    line_items: [{ price: priceId, quantity: 1 }],
+    success_url: `${siteUrl}/?paid=1`,
+    cancel_url: `${siteUrl}/?canceled=1`,
+    allow_promotion_codes: true,
+    subscription_data: { metadata: { user_id: user.id } },
+    metadata: { user_id: user.id },
+  });
 
-    if (userId) {
-      const isPro = status === "active" || status === "trialing";
-
-      await svc
-        .from("user_entitlements")
-        .update({
-          plan: isPro ? "pro" : "free",
-          scans_limit: isPro ? 999999999 : 3,
-          stripe_subscription_id: sub.id,
-          stripe_subscription_status: status,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("user_id", userId);
-    }
-  }
-
-  return NextResponse.json({ received: true });
+  return NextResponse.json({ ok: true, url: session.url });
 }

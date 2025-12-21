@@ -1,11 +1,10 @@
-// src/lib/stripe.ts
-import Stripe from "stripe";
+// src/lib/supabase/admin.ts
+import { createClient } from "@supabase/supabase-js";
 
-const secretKey = process.env.STRIPE_SECRET_KEY;
-
-if (!secretKey) {
-  throw new Error("Missing STRIPE_SECRET_KEY");
+export function supabaseAdmin() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false } }
+  );
 }
-
-// ✅ 不要手写 2025-12-20，直接用 Stripe SDK 自带的默认版本
-export const stripe = new Stripe(secretKey);
