@@ -1,43 +1,55 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabaseBrowser } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
+import { supabaseClient } from "@/lib/supabase/client";
 
 export default function HistoryPage() {
-  const [data, setData] = useState<any>(null);
+  const supabase = supabaseClient();
   const router = useRouter();
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const run = async () => {
-      const supabase = supabaseBrowser();
-
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        router.replace("/login");
+    const load = async () => {
+      const { data: auth } = await supabase.auth.getUser();
+      if (!auth.user) {
+        router.push("/login");
         return;
       }
 
       const { data } = await supabase
-        .from("gp_scan_history")
+        .from("history")
         .select("*")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
+        .order("created_at", { ascending: false });
 
-      setData(data);
+      setItems(data || []);
+      setLoading(false);
     };
 
-    run();
-  }, [router]);
+    load();
+  }, []);
 
-  if (!data) return <p>Loading…</p>;
+  if (loading) {
+    return <div className="p-4 text-sm text-neutral-500">Loading…</div>;
+  }
 
   return (
-    <main className="p-6">
-      <h1 className="text-xl font-semibold">{data.product_name}</h1>
-      <p>Score: {data.score}</p>
-      <p>{data.headline}</p>
+    <main className="p-4 space-y-3">
+      <h1 className="text-xl font-semibold">History</h1>
+
+      {items.length === 0 && (
+        <div className="text-sm text-neutral-500">No history yet.</div>
+      )}
+
+      {items.map((it) => (
+        <div
+          key={it.id}
+          className="rounded-xl border border-neutral-200 p-3 text-sm"
+        >
+          {JSON.stringify(it)}
+        </div>
+      ))}
     </main>
   );
 }
