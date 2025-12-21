@@ -25,54 +25,46 @@ export default function TopNav() {
 
   const logout = async () => {
     await supabase.auth.signOut();
-    window.location.href = "/"; // ✅ Logout 后回首页
+    window.location.href = "/";
   };
 
   return (
     <header className="border-b bg-white">
       <div className="mx-auto flex max-w-4xl items-center justify-between p-4">
-        {/* 左侧品牌 */}
+        {/* Brand */}
         <Link href="/" className="font-semibold">
           Goodpick
         </Link>
 
-        {/* 中间主导航 */}
+        {/* Main Nav */}
         <nav className="flex items-center gap-6 text-sm">
-          <Link href="/" className="hover:text-black text-neutral-700">
+          <Link href="/" className="text-neutral-700 hover:text-black">
             Scan
           </Link>
-
-          <Link
-            href="/history"
-            className="hover:text-black text-neutral-700"
-          >
-            搜索历史
+          <Link href="/history" className="text-neutral-700 hover:text-black">
+            History
           </Link>
-
-          <Link
-            href="/better"
-            className="hover:text-black text-neutral-700"
-          >
-            更好的替代
+          <Link href="/better" className="text-neutral-700 hover:text-black">
+            Better Alternatives
           </Link>
         </nav>
 
-        {/* 右侧账号区 */}
+        {/* Account */}
         <div className="flex items-center gap-4 text-sm">
           {user ? (
             <>
-              <Link href="/account" className="hover:text-black text-neutral-700">
+              <Link href="/account" className="text-neutral-700 hover:text-black">
                 Account
               </Link>
               <button
                 onClick={logout}
-                className="hover:text-black text-neutral-700"
+                className="text-neutral-700 hover:text-black"
               >
                 Logout
               </button>
             </>
           ) : (
-            <Link href="/login" className="hover:text-black text-neutral-700">
+            <Link href="/login" className="text-neutral-700 hover:text-black">
               Login
             </Link>
           )}
