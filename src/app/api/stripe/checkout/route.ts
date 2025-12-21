@@ -1,53 +1,26 @@
+// src/app/api/stripe/checkout/route.ts
 import { NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe";
-import { supabaseServer } from "@/lib/supabase/server";
-import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 
-export async function POST() {
-  const supabase = supabaseServer();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ ok: false }, { status: 401 });
+export async function POST(req: Request) {
+  const body = await req.json().catch(() => ({} as any));
+  const { priceId, userId } = body as { priceId?: string; userId?: string };
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL!;
-  const priceId = process.env.STRIPE_PRICE_ID_PRO!;
-  const svc = supabaseAdmin();
-
-  const { data: ent } = await svc
-    .from("user_entitlements")
-    .select("stripe_customer_id")
-    .eq("user_id", user.id)
-    .single();
-
-  let customerId = ent?.stripe_customer_id ?? null;
-
-  if (!customerId) {
-    const customer = await stripe.customers.create({
-      email: user.email ?? undefined,
-      metadata: { user_id: user.id },
-    });
-    customerId = customer.id;
-
-    // 如果你的 user_entitlements 行可能不存在，建议用 upsert
-    await svc.from("user_entitlements").upsert({
-      user_id: user.id,
-      stripe_customer_id: customerId,
-      updated_at: new Date().toISOString(),
-    });
+  if (!priceId || !userId) {
+    return NextResponse.json({ error: "Missing priceId or userId" }, { status: 400 });
   }
+
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
 
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
-    customer: customerId,
     line_items: [{ price: priceId, quantity: 1 }],
-    success_url: `${siteUrl}/?paid=1`,
-    cancel_url: `${siteUrl}/?canceled=1`,
-    allow_promotion_codes: true,
-    subscription_data: { metadata: { user_id: user.id } },
-    metadata: { user_id: user.id },
+    success_url: `${siteUrl}/billing?success=1`,
+    cancel_url: `${siteUrl}/billing?canceled=1`,
+    metadata: { userId },
   });
 
-  return NextResponse.json({ ok: true, url: session.url });
+  return NextResponse.json({ url: session.url });
 }

@@ -1,53 +1,73 @@
+// src/app/api/stripe/webhook/route.ts
 import { NextResponse } from "next/server";
+import Stripe from "stripe";
 import { stripe } from "@/lib/stripe";
-import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const runtime = "nodejs"; // Stripe webhooks 需要 node runtime
 
-export async function POST() {
-  const supabase = supabaseServer();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ ok: false }, { status: 401 });
+function getCustomerId(customer: Stripe.Event.Data.Object["customer"]): string | null {
+  if (typeof customer === "string") return customer;
+  if (customer && typeof customer === "object" && "id" in customer && typeof customer.id === "string") {
+    return customer.id;
+  }
+  return null;
+}
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL!;
-  const priceId = process.env.STRIPE_PRICE_ID_PRO!;
-  const svc = supabaseAdmin();
+export async function POST(req: Request) {
+  const sig = req.headers.get("stripe-signature");
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
-  const { data: ent } = await svc
-    .from("user_entitlements")
-    .select("stripe_customer_id")
-    .eq("user_id", user.id)
-    .single();
-
-  let customerId = ent?.stripe_customer_id ?? null;
-
-  if (!customerId) {
-    const customer = await stripe.customers.create({
-      email: user.email ?? undefined,
-      metadata: { user_id: user.id },
-    });
-    customerId = customer.id;
-
-    // 如果你的 user_entitlements 行可能不存在，建议用 upsert
-    await svc.from("user_entitlements").upsert({
-      user_id: user.id,
-      stripe_customer_id: customerId,
-      updated_at: new Date().toISOString(),
-    });
+  if (!sig || !webhookSecret) {
+    return NextResponse.json({ error: "Missing stripe-signature or STRIPE_WEBHOOK_SECRET" }, { status: 400 });
   }
 
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    customer: customerId,
-    line_items: [{ price: priceId, quantity: 1 }],
-    success_url: `${siteUrl}/?paid=1`,
-    cancel_url: `${siteUrl}/?canceled=1`,
-    allow_promotion_codes: true,
-    subscription_data: { metadata: { user_id: user.id } },
-    metadata: { user_id: user.id },
-  });
+  const rawBody = await req.text();
 
-  return NextResponse.json({ ok: true, url: session.url });
+  let event: Stripe.Event;
+  try {
+    event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
+  } catch (err: any) {
+    return NextResponse.json({ error: `Webhook signature verification failed: ${err?.message ?? "unknown"}` }, { status: 400 });
+  }
+
+  try {
+    // ✅ 你按需要处理你关心的事件
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object as Stripe.Checkout.Session;
+
+      const customerId = getCustomerId(session.customer);
+      const email = session.customer_details?.email ?? null;
+      const userId = (session.metadata?.userId as string | undefined) ?? null;
+
+      // 示例：把 stripe customer id 写回 supabase（按你自己的表结构改）
+      if (userId && customerId) {
+        await supabaseAdmin
+          .from("profiles")
+          .update({ stripe_customer_id: customerId, stripe_email: email })
+          .eq("id", userId);
+      }
+    }
+
+    if (event.type === "customer.subscription.created" || event.type === "customer.subscription.updated") {
+      const sub = event.data.object as Stripe.Subscription;
+      const customerId = getCustomerId(sub.customer);
+
+      // 示例：同步订阅状态（按你自己的表结构改）
+      if (customerId) {
+        await supabaseAdmin
+          .from("subscriptions")
+          .upsert({
+            stripe_customer_id: customerId,
+            stripe_subscription_id: sub.id,
+            status: sub.status,
+            current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+          });
+      }
+    }
+
+    return NextResponse.json({ received: true });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message ?? "Webhook handler error" }, { status: 500 });
+  }
 }
