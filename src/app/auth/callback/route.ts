@@ -1,27 +1,22 @@
-// src/app/auth/callback/route.ts
 import { NextResponse } from "next/server";
-import { supabaseServer } from "@/lib/supabase/server";
-
-export const runtime = "nodejs";
+import { createClient } from "@supabase/supabase-js";
 
 export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const code = url.searchParams.get("code");
-  const next = url.searchParams.get("next") ?? "/";
+  const { searchParams, origin } = new URL(req.url);
+  const code = searchParams.get("code");
+  const next = searchParams.get("next") ?? "/history";
 
   if (!code) {
-    return NextResponse.redirect(new URL(`/login?e=missing_code`, url.origin));
+    return NextResponse.redirect(`${origin}/login`);
   }
 
-  const supabase = await supabaseServer();
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
 
-  const { error } = await supabase.auth.exchangeCodeForSession(code);
+  // 用 code 换 session（Supabase 必须）
+  await supabase.auth.exchangeCodeForSession(code);
 
-  if (error) {
-    return NextResponse.redirect(
-      new URL(`/login?e=${encodeURIComponent(error.message)}`, url.origin)
-    );
-  }
-
-  return NextResponse.redirect(new URL(next, url.origin));
+  return NextResponse.redirect(`${origin}${next}`);
 }
