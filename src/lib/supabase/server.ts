@@ -1,8 +1,8 @@
-import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
 
 export async function supabaseServer() {
-  const cookieStore = await cookies(); // ✅ Next 16 这里是 async
+  const cookieStore = cookies();
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -13,12 +13,8 @@ export async function supabaseServer() {
           return cookieStore.getAll();
         },
         setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
-            });
-          } catch {
-            // 在某些渲染阶段可能不能 set，忽略即可（Route Handler 正常能 set）
+          for (const { name, value, options } of cookiesToSet) {
+            cookieStore.set(name, value, options);
           }
         },
       },

@@ -1,56 +1,106 @@
+// src/app/api/analyze/route.ts
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { supabaseServer } from "@/lib/supabase/server";
-import { supabaseAdmin } from "@/lib/supabase/admin";
+import { createClient } from "@supabase/supabase-js";
+
+export const runtime = "nodejs"; // 避免 edge 环境下某些依赖不兼容
 
 const LIMIT = 3;
 
-export async function POST(req: Request) {
-  // 1) 如果已登录：不走 guest 限制（或你也可以走登录用户限制）
-  const supabase = supabaseServer();
-  const { data: auth } = await supabase.auth.getUser();
-  const user = auth.user;
+// 仅服务端用（Service Role）
+function supabaseAdmin() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false } }
+  );
+}
 
-  if (!user) {
-    // 2) 未登录：按设备 guest_id 限制 3 次
-    const guestId = cookies().get("gp_guest")?.value;
-    if (!guestId) {
-      return NextResponse.json({ ok: false, error: "no_guest_cookie" }, { status: 400 });
-    }
+async function enforceGuestQuota() {
+  const guestId = cookies().get("gp_guest")?.value;
 
-    const admin = supabaseAdmin();
-
-    // upsert 保证有记录
-    const { data: row, error: upsertErr } = await admin
-      .from("gp_guest_quota")
-      .upsert({ guest_id: guestId }, { onConflict: "guest_id" })
-      .select("used")
-      .single();
-
-    if (upsertErr) {
-      return NextResponse.json({ ok: false, error: upsertErr.message }, { status: 500 });
-    }
-
-    if ((row?.used ?? 0) >= LIMIT) {
-      return NextResponse.json(
-        { ok: false, error: "guest_limit_reached", limit: LIMIT },
-        { status: 402 }
-      );
-    }
-
-    // 扣 1 次（原子更新）
-    const { error: incErr } = await admin
-      .from("gp_guest_quota")
-      .update({ used: (row?.used ?? 0) + 1 })
-      .eq("guest_id", guestId);
-
-    if (incErr) {
-      return NextResponse.json({ ok: false, error: incErr.message }, { status: 500 });
-    }
+  if (!guestId) {
+    return { ok: false as const, status: 400, error: "no_guest_cookie" };
   }
 
-  // 3) 你的原本扫描逻辑继续
-  const body = await req.json();
-  // ... do scan ...
-  return NextResponse.json({ ok: true /*, result... */ });
+  const admin = supabaseAdmin();
+
+  // 确保有记录
+  const { data: row, error: upsertErr } = await admin
+    .from("gp_guest_quota")
+    .upsert({ guest_id: guestId }, { onConflict: "guest_id" })
+    .select("used")
+    .single();
+
+  if (upsertErr) {
+    return { ok: false as const, status: 500, error: upsertErr.message };
+  }
+
+  const used = row?.used ?? 0;
+
+  if (used >= LIMIT) {
+    return {
+      ok: false as const,
+      status: 402,
+      error: "guest_limit_reached",
+      limit: LIMIT,
+      used,
+    };
+  }
+
+  // 扣 1 次（简单版本：读-改-写；足够用）
+  const { error: incErr } = await admin
+    .from("gp_guest_quota")
+    .update({ used: used + 1 })
+    .eq("guest_id", guestId);
+
+  if (incErr) {
+    return { ok: false as const, status: 500, error: incErr.message };
+  }
+
+  return { ok: true as const, guestId, usedBefore: used, limit: LIMIT };
+}
+
+export async function POST(req: Request) {
+  try {
+    // 1) 先判断登录态：登录用户不限次
+    const supabase = await supabaseServer();
+    const { data: authData } = await supabase.auth.getUser();
+    const user = authData.user;
+
+    // 2) 未登录：执行“每设备 3 次”限制
+    if (!user) {
+      const quota = await enforceGuestQuota();
+      if (!quota.ok) {
+        return NextResponse.json(
+          { ok: false, error: quota.error, ...(quota as any) },
+          { status: quota.status }
+        );
+      }
+    }
+
+    // 3) 你的 analyze 输入
+    const body = await req.json();
+
+    // ============================
+    // ✅ 把你原来的分析逻辑放这里
+    // 例如：
+    // const result = await analyzeFood(body);
+    // return NextResponse.json({ ok: true, result });
+    // ============================
+
+    // 临时示例返回（你替换掉）
+    return NextResponse.json({
+      ok: true,
+      user_id: user?.id ?? null,
+      message: "analyze ok (replace with your real analyze logic)",
+      input: body,
+    });
+  } catch (e: any) {
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? "unknown_error" },
+      { status: 500 }
+    );
+  }
 }
