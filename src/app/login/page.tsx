@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -9,111 +10,105 @@ const supabase = createClient(
 );
 
 export default function LoginPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"login" | "signup">("login");
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  async function google() {
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
-  }
-
-  async function login() {
+  async function handleLogin() {
+    setLoading(true);
     setError(null);
+
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
-    if (error) setError(error.message);
+
+    setLoading(false);
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+
+    router.push("/scan");
   }
 
-  async function signup() {
+  async function handleSignup() {
+    setLoading(true);
     setError(null);
+
     const { error } = await supabase.auth.signUp({
       email,
       password,
+    });
+
+    setLoading(false);
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+
+    router.push("/scan");
+  }
+
+  async function handleGoogle() {
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${location.origin}/auth/callback`,
       },
     });
-    if (error) setError(error.message);
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-4">
-      <h1 className="text-2xl font-semibold">Login</h1>
+    <div style={{ maxWidth: 420, margin: "80px auto" }}>
+      <h2>Login</h2>
 
-      {/* Google */}
-      <button
-        onClick={google}
-        className="border px-6 py-2 rounded w-64"
-      >
+      <button onClick={handleGoogle} style={{ width: "100%" }}>
         Continue with Google
       </button>
 
-      <div className="text-sm text-gray-400">or</div>
+      <div style={{ margin: "16px 0", textAlign: "center" }}>or</div>
 
-      {/* Email */}
       <input
-        className="border px-3 py-2 rounded w-64"
         placeholder="Email"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
+        style={{ width: "100%", marginBottom: 8 }}
       />
 
       <input
-        className="border px-3 py-2 rounded w-64"
-        type="password"
         placeholder="Password"
+        type="password"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
+        style={{ width: "100%", marginBottom: 8 }}
       />
 
-      {error && <div className="text-sm text-red-500">{error}</div>}
+      {error && <p style={{ color: "red" }}>{error}</p>}
 
-      {mode === "login" ? (
-        <>
-          <button
-            onClick={login}
-            className="bg-black text-white px-6 py-2 rounded w-64"
-          >
-            Login
-          </button>
+      <button
+        onClick={handleLogin}
+        disabled={loading}
+        style={{ width: "100%", marginBottom: 8 }}
+      >
+        Login
+      </button>
 
-          <button
-            onClick={() => setMode("signup")}
-            className="text-sm underline"
-          >
-            Create account
-          </button>
-        </>
-      ) : (
-        <>
-          <button
-            onClick={signup}
-            className="bg-black text-white px-6 py-2 rounded w-64"
-          >
-            Sign up
-          </button>
+      <button
+        onClick={handleSignup}
+        disabled={loading}
+        style={{ width: "100%" }}
+      >
+        Create account
+      </button>
 
-          <button
-            onClick={() => setMode("login")}
-            className="text-sm underline"
-          >
-            Already have an account?
-          </button>
-        </>
-      )}
-
-      {/* Guest 只是回首页，不碰 Supabase */}
-      <a href="/" className="text-sm underline mt-2">
-        Continue as guest (limited)
-      </a>
+      <div style={{ marginTop: 16, textAlign: "center" }}>
+        <a href="/scan">Continue as guest (limited)</a>
+      </div>
     </div>
   );
 }
