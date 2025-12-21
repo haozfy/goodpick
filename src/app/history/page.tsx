@@ -1,16 +1,18 @@
-import { redirect } from "next/navigation";
-import { supabaseServer } from "@/lib/supabase/server";
+"use client";
 
-export default async function HistoryPage() {
-  const supabase = supabaseServer();
-  const { data } = await supabase.auth.getUser();
+import { useEffect, useState } from "react";
+import { supabaseBrowser } from "@/lib/supabase/client";
 
-  if (!data.user) redirect("/login");
+export default function HistoryPage() {
+  const [user, setUser] = useState<any>(null);
 
-  return (
-    <main className="mx-auto w-full max-w-3xl px-6 py-16">
-      <h1 className="text-2xl font-semibold">History</h1>
-      <p className="mt-2 text-sm text-neutral-600">Signed in as: {data.user.email}</p>
-    </main>
-  );
+  useEffect(() => {
+    supabaseBrowser().auth.getUser().then(({ data }) => {
+      setUser(data.user);
+    });
+  }, []);
+
+  if (!user) return <div className="p-8">Please login</div>;
+
+  return <div className="p-8">Hello {user.email}</div>;
 }

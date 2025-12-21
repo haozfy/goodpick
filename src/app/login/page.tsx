@@ -1,118 +1,89 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
-type Mode = "signin" | "signup" | "forgot";
-
 export default function LoginPage() {
-  const supabase = useMemo(() => supabaseBrowser(), []);
-  const [mode, setMode] = useState<Mode>("signin");
+  const supabase = supabaseBrowser();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
 
-  const redirectTo = `${window.location.origin}/auth/callback?next=/history`;
-
-  const onGoogle = async () => {
-    setBusy(true); setMsg(null);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo },
-    });
-    if (error) setMsg(error.message);
-    setBusy(false);
-  };
-
-  const onSignin = async () => {
-    setBusy(true); setMsg(null);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) setMsg(error.message);
-    else window.location.href = "/history";
-    setBusy(false);
-  };
-
-  const onSignup = async () => {
-    setBusy(true); setMsg(null);
+  // Email + password 注册
+  const onSignUp = async () => {
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: redirectTo },
     });
-    if (error) setMsg(error.message);
-    else setMsg("✅ Account created. If email confirmation is enabled, check your inbox.");
-    setBusy(false);
+    if (error) alert(error.message);
+    else alert("Account created. You can now log in.");
   };
 
-  const onForgot = async () => {
-    setBusy(true); setMsg(null);
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset`,
+  // Email + password 登录
+  const onSignIn = async () => {
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
     });
-    if (error) setMsg(error.message);
-    else setMsg("✅ Password reset email sent. Check your inbox.");
-    setBusy(false);
+    if (error) alert(error.message);
+    else window.location.href = "/history";
+  };
+
+  // 忘记密码
+  const onReset = async () => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/callback`,
+    });
+    if (error) alert(error.message);
+    else alert("Check your email to reset password.");
+  };
+
+  // Google 登录
+  const onGoogleLogin = async () => {
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=/history`,
+      },
+    });
   };
 
   return (
-    <main className="mx-auto w-full max-w-md px-6 py-16">
-      <h1 className="text-3xl font-semibold">Login</h1>
+    <main className="mx-auto max-w-sm px-6 py-16 space-y-4">
+      <h1 className="text-2xl font-semibold">Login</h1>
 
-      <div className="mt-4 flex gap-2 text-sm">
-        <button className={`rounded-lg px-3 py-1 border ${mode==="signin"?"bg-black text-white":"bg-white"}`} onClick={() => setMode("signin")}>Sign in</button>
-        <button className={`rounded-lg px-3 py-1 border ${mode==="signup"?"bg-black text-white":"bg-white"}`} onClick={() => setMode("signup")}>Create account</button>
-        <button className={`rounded-lg px-3 py-1 border ${mode==="forgot"?"bg-black text-white":"bg-white"}`} onClick={() => setMode("forgot")}>Forgot</button>
-      </div>
+      <button onClick={onGoogleLogin} className="w-full h-11 border rounded">
+        Continue with Google
+      </button>
 
-      <div className="mt-6 space-y-3 rounded-2xl border border-neutral-200 bg-white p-6">
-        <button
-          disabled={busy}
-          onClick={onGoogle}
-          className="h-11 w-full rounded-xl border border-neutral-200 text-sm hover:border-neutral-400 disabled:opacity-60"
-        >
-          Continue with Google
-        </button>
+      <div className="text-xs text-neutral-400 text-center">or</div>
 
-        <div className="text-center text-xs text-neutral-500">or</div>
+      <input
+        className="w-full h-11 border rounded px-3"
+        placeholder="Email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+      />
 
-        <input
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="h-11 w-full rounded-xl border border-neutral-200 px-4 text-sm outline-none focus:border-neutral-400"
-          placeholder="Email"
-        />
+      <input
+        className="w-full h-11 border rounded px-3"
+        placeholder="Password"
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+      />
 
-        {mode !== "forgot" && (
-          <input
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            type="password"
-            className="h-11 w-full rounded-xl border border-neutral-200 px-4 text-sm outline-none focus:border-neutral-400"
-            placeholder="Password"
-          />
-        )}
+      <button onClick={onSignIn} className="w-full h-11 bg-black text-white rounded">
+        Login
+      </button>
 
-        {mode === "signin" && (
-          <button disabled={busy} onClick={onSignin} className="h-11 w-full rounded-xl bg-black text-sm text-white hover:opacity-90 disabled:opacity-60">
-            Sign in
-          </button>
-        )}
+      <button onClick={onSignUp} className="w-full h-11 border rounded">
+        Create account
+      </button>
 
-        {mode === "signup" && (
-          <button disabled={busy} onClick={onSignup} className="h-11 w-full rounded-xl bg-black text-sm text-white hover:opacity-90 disabled:opacity-60">
-            Create account
-          </button>
-        )}
-
-        {mode === "forgot" && (
-          <button disabled={busy} onClick={onForgot} className="h-11 w-full rounded-xl bg-black text-sm text-white hover:opacity-90 disabled:opacity-60">
-            Send reset email
-          </button>
-        )}
-
-        {msg && <div className="text-sm text-neutral-700">{msg}</div>}
-      </div>
+      <button onClick={onReset} className="w-full text-xs text-neutral-500">
+        Forgot password?
+      </button>
     </main>
   );
 }
