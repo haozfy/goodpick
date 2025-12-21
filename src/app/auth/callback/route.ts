@@ -1,22 +1,14 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { supabaseBrowser } from "@/lib/supabase/client";
 
 export async function GET(req: Request) {
-  const { searchParams, origin } = new URL(req.url);
-  const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/history";
+  const url = new URL(req.url);
 
-  if (!code) {
-    return NextResponse.redirect(`${origin}/login`);
-  }
+  // Supabase 会自动把 session 写进 localStorage（browser）
+  // 这里我们只负责 redirect
+  const next = url.searchParams.get("next") || "/";
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  return NextResponse.redirect(
+    new URL(next, url.origin)
   );
-
-  // 用 code 换 session（Supabase 必须）
-  await supabase.auth.exchangeCodeForSession(code);
-
-  return NextResponse.redirect(`${origin}${next}`);
 }
