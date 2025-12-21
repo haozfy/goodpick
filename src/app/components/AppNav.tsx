@@ -1,44 +1,65 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@supabase/supabase-js";
 
-const items = [
-  { href: "/", label: "Scan" },
-  { href: "/history", label: "History" },
-  { href: "/login", label: "Login" },
-];
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
-export default function AppNav() {
-  const pathname = usePathname();
+export default function TopNav() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<any>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user);
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) return null;
+
+  async function logout() {
+    await supabase.auth.signOut();
+    router.refresh();
+  }
 
   return (
-    <header className="sticky top-0 z-10 border-b border-neutral-200 bg-white/80 backdrop-blur">
-      <div className="mx-auto flex w-full max-w-3xl items-center justify-between px-6 py-5">
-        <div>
-          <div className="text-sm font-semibold">Goodpick</div>
-          <div className="text-xs text-neutral-500">Scan food. Get a better pick.</div>
-        </div>
+    <div className="flex items-center justify-between">
+      <div className="font-semibold">Goodpick</div>
 
-        <nav className="flex items-center gap-5 text-sm">
-          {items.map((it) => {
-            const active = pathname === it.href;
-            return (
-              <Link
-                key={it.href}
-                href={it.href}
-                className={
-                  active
-                    ? "font-medium text-black"
-                    : "text-neutral-600 hover:text-black"
-                }
-              >
-                {it.label}
-              </Link>
-            );
-          })}
-        </nav>
+      <div className="flex items-center gap-4 text-sm">
+        {!user && (
+          <button
+            onClick={() => router.push("/login")}
+            className="text-neutral-600 hover:text-black"
+          >
+            Login
+          </button>
+        )}
+
+        {user && (
+          <>
+            <button
+              onClick={() => router.push("/account")}
+              className="text-neutral-600 hover:text-black"
+            >
+              Account
+            </button>
+
+            <button
+              onClick={logout}
+              className="text-neutral-600 hover:text-black"
+            >
+              Logout
+            </button>
+          </>
+        )}
       </div>
-    </header>
+    </div>
   );
 }

@@ -2,11 +2,17 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import StatusBar from "@/components/StatusBar";
 
 type AnalyzeResult = {
   score: number; // 0-100
   label: "Excellent" | "Good" | "Poor" | "Bad";
-  negatives: { name: string; valueText: string; hint: string; level: "low" | "mid" | "high" }[];
+  negatives: {
+    name: string;
+    valueText: string;
+    hint: string;
+    level: "low" | "mid" | "high";
+  }[];
   positives: { name: string; valueText: string; hint: string }[];
 };
 
@@ -45,7 +51,10 @@ export default function HomePage() {
   const [result, setResult] = useState<AnalyzeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const label = useMemo(() => (result ? scoreLabel(result.score) : null), [result]);
+  const label = useMemo(
+    () => (result ? scoreLabel(result.score) : null),
+    [result]
+  );
 
   const onPick = (file?: File) => {
     if (!file) return;
@@ -67,7 +76,6 @@ export default function HomePage() {
         body: JSON.stringify({ imageUrl }),
       });
 
-      // 🔒 门控处理
       if (res.status === 401 || res.status === 403) {
         router.push("/login");
         return;
@@ -84,7 +92,6 @@ export default function HomePage() {
         return;
       }
 
-      // 👉 期望后端返回 result
       setResult(data.result as AnalyzeResult);
     } catch {
       setError("Network error");
@@ -95,7 +102,10 @@ export default function HomePage() {
 
   return (
     <main className="space-y-4 p-4">
-      {/* 主卡片：拍照/上传 */}
+      {/* 顶部状态条 */}
+      <StatusBar />
+
+      {/* 扫描卡片 */}
       <section className="rounded-2xl border border-neutral-200 p-4 shadow-sm">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -134,11 +144,17 @@ export default function HomePage() {
             >
               <div className="text-3xl">📷</div>
               <div className="mt-2 text-sm font-medium">Take a photo</div>
-              <div className="mt-1 text-xs text-neutral-500">Best: straight, bright, full label</div>
+              <div className="mt-1 text-xs text-neutral-500">
+                Best: straight, bright, full label
+              </div>
             </button>
           ) : (
             <div className="overflow-hidden rounded-2xl border border-neutral-200">
-              <img src={imageUrl} alt="preview" className="h-56 w-full object-cover" />
+              <img
+                src={imageUrl}
+                alt="preview"
+                className="h-56 w-full object-cover"
+              />
             </div>
           )}
 
@@ -163,15 +179,21 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* 结果卡片 */}
+      {/* 结果 */}
       {result && (
         <section className="rounded-2xl border border-neutral-200 p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className={`h-2.5 w-2.5 rounded-full ${scoreDotClass(result.label)}`} />
+              <span
+                className={`h-2.5 w-2.5 rounded-full ${scoreDotClass(
+                  result.label
+                )}`}
+              />
               <div className="text-sm font-semibold">{result.label}</div>
             </div>
-            <div className="text-sm text-neutral-500">{result.score}/100</div>
+            <div className="text-sm text-neutral-500">
+              {result.score}/100
+            </div>
           </div>
 
           <div className="mt-4 space-y-6">
@@ -179,15 +201,26 @@ export default function HomePage() {
               <div className="mb-2 text-sm font-semibold">Negatives</div>
               <div className="space-y-3">
                 {result.negatives.map((n) => (
-                  <div key={n.name} className="rounded-xl border border-neutral-200 p-3">
+                  <div
+                    key={n.name}
+                    className="rounded-xl border border-neutral-200 p-3"
+                  >
                     <div className="flex items-center justify-between">
                       <div className="text-sm font-medium">{n.name}</div>
-                      <span className={`rounded-full px-2 py-0.5 text-[11px] ${levelPill(n.level)}`}>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[11px] ${levelPill(
+                          n.level
+                        )}`}
+                      >
                         {n.level.toUpperCase()}
                       </span>
                     </div>
-                    <div className="mt-1 text-xs text-neutral-500">{n.hint}</div>
-                    <div className="mt-2 text-xs text-neutral-600">{n.valueText}</div>
+                    <div className="mt-1 text-xs text-neutral-500">
+                      {n.hint}
+                    </div>
+                    <div className="mt-2 text-xs text-neutral-600">
+                      {n.valueText}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -197,12 +230,19 @@ export default function HomePage() {
               <div className="mb-2 text-sm font-semibold">Positives</div>
               <div className="space-y-3">
                 {result.positives.map((p) => (
-                  <div key={p.name} className="rounded-xl border border-neutral-200 p-3">
+                  <div
+                    key={p.name}
+                    className="rounded-xl border border-neutral-200 p-3"
+                  >
                     <div className="flex items-center justify-between">
                       <div className="text-sm font-medium">{p.name}</div>
-                      <div className="text-xs text-neutral-600">{p.valueText}</div>
+                      <div className="text-xs text-neutral-600">
+                        {p.valueText}
+                      </div>
                     </div>
-                    <div className="mt-1 text-xs text-neutral-500">{p.hint}</div>
+                    <div className="mt-1 text-xs text-neutral-500">
+                      {p.hint}
+                    </div>
                   </div>
                 ))}
               </div>
