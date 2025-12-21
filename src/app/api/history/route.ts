@@ -1,11 +1,27 @@
 import { NextResponse } from "next/server";
-import { supabaseServer } from "@/lib/supabase/server";
+import { createClient } from "@supabase/supabase-js";
 
-export async function GET() {
-  const supabase = await supabaseServer();
+function supabaseFromAuthHeader(req: Request) {
+  const token = req.headers.get("authorization")?.replace("Bearer ", "");
+  if (!token) return { supabase: null, token: null };
 
-  const { data: auth } = await supabase.auth.getUser();
-  if (!auth.user) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { global: { headers: { Authorization: `Bearer ${token}` } } }
+  );
+
+  return { supabase, token };
+}
+
+export async function GET(req: Request) {
+  const { supabase } = supabaseFromAuthHeader(req);
+  if (!supabase) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+
+  const { data: auth, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !auth.user) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
 
   const { data, error } = await supabase
     .from("gp_scan_history")
