@@ -1,55 +1,53 @@
+// src/app/history/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { supabaseClient } from "@/lib/supabase/client";
+import { supabaseBrowser } from "@/lib/supabase/client";
+
+type Item = { id: string; created_at: string; title?: string };
 
 export default function HistoryPage() {
-  const supabase = supabaseClient();
-  const router = useRouter();
-  const [items, setItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<Item[]>([]);
+  const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    const load = async () => {
-      const { data: auth } = await supabase.auth.getUser();
-      if (!auth.user) {
-        router.push("/login");
+    (async () => {
+      const supabase = supabaseBrowser();
+      const {
+        data: { user },
+        error: uerr,
+      } = await supabase.auth.getUser();
+
+      if (uerr || !user) {
+        window.location.href = "/login?next=/history";
         return;
       }
 
-      const { data } = await supabase
-        .from("history")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      setItems(data || []);
-      setLoading(false);
-    };
-
-    load();
+      // 这里先占位：你后面接你的表
+      setItems([]);
+      setMsg(null);
+    })();
   }, []);
 
-  if (loading) {
-    return <div className="p-4 text-sm text-neutral-500">Loading…</div>;
-  }
-
   return (
-    <main className="p-4 space-y-3">
-      <h1 className="text-xl font-semibold">History</h1>
+    <main className="mx-auto max-w-4xl space-y-4 p-4">
+      <h1 className="text-2xl font-semibold">History</h1>
 
-      {items.length === 0 && (
-        <div className="text-sm text-neutral-500">No history yet.</div>
-      )}
+      {msg && <div className="text-sm text-neutral-700">{msg}</div>}
 
-      {items.map((it) => (
-        <div
-          key={it.id}
-          className="rounded-xl border border-neutral-200 p-3 text-sm"
-        >
-          {JSON.stringify(it)}
-        </div>
-      ))}
+      <div className="rounded-2xl border border-neutral-200 p-4">
+        {items.length === 0 ? (
+          <div className="text-sm text-neutral-500">No history yet.</div>
+        ) : (
+          <ul className="space-y-2">
+            {items.map((it) => (
+              <li key={it.id} className="text-sm">
+                {it.title ?? it.id} — {new Date(it.created_at).toLocaleString()}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </main>
   );
 }

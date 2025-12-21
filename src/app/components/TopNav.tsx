@@ -1,51 +1,28 @@
-"use client";
-
+// src/app/components/TopNav.tsx
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { supabaseClient } from "@/lib/supabase/client";
+import UserMenu from "@/app/components/UserMenu";
 
 export default function TopNav() {
-  const supabase = supabaseClient();
-  const [email, setEmail] = useState<string | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-
-    supabase.auth.getUser().then(({ data }) => {
-      if (!mounted) return;
-      setEmail(data.user?.email ?? null);
-    });
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      setEmail(session?.user?.email ?? null);
-    });
-
-    return () => {
-      mounted = false;
-      sub.subscription.unsubscribe();
-    };
-  }, []);
-
-  const logout = async () => {
-    await supabase.auth.signOut();
-    window.location.href = "/";
-  };
-
   return (
-    <header className="flex items-center justify-between border-b px-4 py-3">
-      <Link href="/" className="font-semibold">
-        Goodpick
-      </Link>
+    <header className="sticky top-0 z-20 border-b border-neutral-200 bg-white/80 backdrop-blur">
+      <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
+        <div className="flex items-center gap-3">
+          <Link href="/" className="font-semibold">
+            Goodpick
+          </Link>
+          <span className="text-sm text-neutral-500">Scan food. Get a better pick.</span>
+        </div>
 
-      <nav className="flex items-center gap-4 text-sm">
-        <Link href="/">Scan</Link>
-        {email ? <Link href="/account">Account</Link> : <Link href="/login">Login</Link>}
-        {email && (
-          <button onClick={logout} className="text-red-600">
-            Logout
-          </button>
-        )}
-      </nav>
+        <nav className="flex items-center gap-4 text-sm">
+          <Link href="/" className="text-neutral-700 hover:text-black">
+            Scan
+          </Link>
+          <Link href="/history" className="text-neutral-700 hover:text-black">
+            History
+          </Link>
+          <UserMenu />
+        </nav>
+      </div>
     </header>
   );
 }

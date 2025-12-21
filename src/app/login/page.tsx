@@ -1,57 +1,126 @@
+// src/app/login/page.tsx
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { supabaseBrowser } from "@/lib/supabase/client";
 
-export default function HomePage() {
-  const fileRef = useRef<HTMLInputElement | null>(null);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+export default function LoginPage() {
+  const sp = useSearchParams();
+  const next = useMemo(() => sp.get("next") || "/", [sp]);
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const signInWithGoogle = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const supabase = supabaseBrowser();
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+        },
+      });
+      if (error) setMsg(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const signInWithEmail = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const supabase = supabaseBrowser();
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        setMsg(error.message);
+        return;
+      }
+      window.location.href = next;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const signUpWithEmail = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const supabase = supabaseBrowser();
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+        },
+      });
+      if (error) {
+        setMsg(error.message);
+        return;
+      }
+      setMsg("Check your email to confirm.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
-    <main className="p-4 space-y-4">
-      <h1 className="text-xl font-semibold">Scan & Analyze</h1>
+    <main className="mx-auto max-w-md space-y-4 p-6">
+      <h1 className="text-2xl font-semibold">Login</h1>
 
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={(e) =>
-          setImageUrl(e.target.files?.[0] ? URL.createObjectURL(e.target.files[0]) : null)
-        }
-      />
+      <button
+        onClick={signInWithGoogle}
+        disabled={busy}
+        className="h-11 w-full rounded-xl border border-neutral-200 px-4 text-sm hover:border-neutral-400 disabled:opacity-50"
+      >
+        Continue with Google
+      </button>
 
-      {!imageUrl ? (
-        <button
-          onClick={() => fileRef.current?.click()}
-          className="flex h-44 w-full flex-col items-center justify-center rounded-2xl border border-dashed border-neutral-300 bg-neutral-50 text-neutral-700 hover:border-neutral-400"
-        >
-          <div className="text-3xl">📷</div>
-          <div className="mt-2 text-sm font-medium">Take a photo</div>
-          <div className="mt-1 text-xs text-neutral-500">Best: straight, bright, full label</div>
-        </button>
-      ) : (
-        <div className="overflow-hidden rounded-2xl border border-neutral-200">
-          <img src={imageUrl} alt="preview" className="h-56 w-full object-cover" />
-        </div>
-      )}
+      <div className="text-center text-xs text-neutral-500">or</div>
 
-      <div className="flex gap-3">
-        <button
-          onClick={() => {
-            setImageUrl(null);
-          }}
-          className="h-11 flex-1 rounded-xl border border-neutral-200 px-4 text-sm hover:border-neutral-400"
-        >
-          Reset
-        </button>
+      <div className="space-y-3 rounded-2xl border border-neutral-200 p-4">
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="email"
+          className="h-11 w-full rounded-xl border border-neutral-200 px-3 text-sm"
+          autoComplete="email"
+        />
+        <input
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="password"
+          className="h-11 w-full rounded-xl border border-neutral-200 px-3 text-sm"
+          autoComplete="current-password"
+          type="password"
+        />
 
         <button
-          onClick={() => fileRef.current?.click()}
-          className="h-11 flex-1 rounded-xl bg-black px-4 text-sm font-medium text-white"
+          onClick={signInWithEmail}
+          disabled={busy}
+          className="h-11 w-full rounded-xl bg-black px-4 text-sm font-medium text-white disabled:opacity-50"
         >
-          {imageUrl ? "Retake" : "Choose photo"}
+          Login
         </button>
+
+        <button
+          onClick={signUpWithEmail}
+          disabled={busy}
+          className="h-11 w-full rounded-xl border border-neutral-200 px-4 text-sm hover:border-neutral-400 disabled:opacity-50"
+        >
+          Create account
+        </button>
+
+        <a href="/reset" className="block text-sm text-neutral-700 underline">
+          Forgot password?
+        </a>
+
+        {msg && <div className="text-sm text-neutral-700">{msg}</div>}
       </div>
     </main>
   );

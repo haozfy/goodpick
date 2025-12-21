@@ -1,74 +1,52 @@
 // src/app/reset/page.tsx
 "use client";
 
-import { useMemo, useState } from "react";
-import { createBrowserClient } from "@supabase/ssr";
-
-function supabaseBrowser() {
-  return createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-}
+import { useState } from "react";
+import { supabaseBrowser } from "@/lib/supabase/client";
 
 export default function ResetPage() {
-  const supabase = useMemo(() => supabaseBrowser(), []);
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
 
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const send = async () => {
     setBusy(true);
-    setErr(null);
     setMsg(null);
-
     try {
-      const origin =
-        typeof window !== "undefined" ? window.location.origin : "";
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: `${origin}/reset/update`,
+      const supabase = supabaseBrowser();
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent("/reset/update")}`,
       });
-
-      if (error) {
-        setErr(error.message);
-        return;
-      }
-
-      setMsg("Reset email sent. Please check your inbox.");
+      if (error) setMsg(error.message);
+      else setMsg("Check your email for the reset link.");
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <main className="mx-auto w-full max-w-md space-y-4">
+    <main className="mx-auto max-w-md space-y-4 p-6">
       <h1 className="text-2xl font-semibold">Reset password</h1>
-      <p className="text-sm text-neutral-600">
-        Enter your email. We’ll send you a reset link.
-      </p>
 
-      <form onSubmit={onSubmit} className="space-y-3">
+      <div className="space-y-3 rounded-2xl border border-neutral-200 p-4">
         <input
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          type="email"
-          required
-          placeholder="you@example.com"
-          className="h-11 w-full rounded-xl border border-neutral-200 px-3 outline-none focus:border-neutral-400"
+          placeholder="email"
+          className="h-11 w-full rounded-xl border border-neutral-200 px-3 text-sm"
+          autoComplete="email"
         />
 
         <button
-          disabled={busy}
+          onClick={send}
+          disabled={busy || !email}
           className="h-11 w-full rounded-xl bg-black px-4 text-sm font-medium text-white disabled:opacity-50"
         >
-          {busy ? "Sending…" : "Send reset email"}
+          Send reset link
         </button>
 
-        {err && <div className="text-sm text-red-600">{err}</div>}
-        {msg && <div className="text-sm text-emerald-700">{msg}</div>}
-      </form>
+        {msg && <div className="text-sm text-neutral-700">{msg}</div>}
+      </div>
     </main>
   );
 }
