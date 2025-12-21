@@ -1,3 +1,4 @@
+// src/app/auth/callback/page.tsx
 "use client";
 
 import { useEffect } from "react";
@@ -9,17 +10,18 @@ export default function AuthCallbackPage() {
   const params = useSearchParams();
 
   useEffect(() => {
-    const supabase = supabaseBrowser();
+    const run = async () => {
+      const supabase = supabaseBrowser();
 
-    supabase.auth.getSession().then(() => {
-      const next = params.get("next") || "/";
+      // 关键：让 supabase 从 URL hash 里接管 session
+      await supabase.auth.getSession();
+
+      const next = params.get("next") || "/history";
       router.replace(next);
-    });
-  }, [router, params]);
+    };
 
-  return (
-    <main className="p-8 text-sm text-neutral-500">
-      Signing you in…
-    </main>
-  );
+    run();
+  }, [params, router]);
+
+  return <p>Signing you in…</p>;
 }
