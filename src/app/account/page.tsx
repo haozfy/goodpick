@@ -1,37 +1,44 @@
-import { redirect } from "next/navigation";
-import { supabaseServer } from "@/lib/supabase/server";
+"use client";
 
-export default async function AccountPage() {
-  const supabase = await supabaseServer();
-  const { data } = await supabase.auth.getUser();
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@supabase/supabase-js";
 
-  if (!data.user) redirect("/login");
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
-  // 你可以后面改成查 profiles/subscriptions 表
-  const isPro = data.user.user_metadata?.plan === "pro";
+export default function AccountPage() {
+  const router = useRouter();
+  const [email, setEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (!data.user) {
+        router.replace("/login");
+      } else {
+        setEmail(data.user.email ?? null);
+      }
+    });
+  }, [router]);
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-6 py-16">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold">Member Area</h1>
-          <p className="mt-2 text-sm text-neutral-600">
-            Logged in as: <span className="font-medium">{data.user.email}</span>
-            {isPro ? <span className="ml-2 rounded-full bg-black px-2 py-1 text-xs text-white">PRO</span> : null}
-          </p>
-        </div>
+    <main className="p-4 space-y-4">
+      <section className="rounded-xl border bg-white p-4">
+        <h1 className="text-lg font-semibold">Account</h1>
+        <p className="text-sm text-neutral-500">{email}</p>
 
-        <form action="/auth/signout" method="post">
-          <button className="h-10 rounded-xl border border-neutral-200 px-4 text-sm hover:border-neutral-400">
-            Logout
-          </button>
-        </form>
-      </div>
-
-      <div className="mt-8 rounded-2xl border border-neutral-200 bg-white p-6">
-        <div className="text-sm font-medium">Status</div>
-        <div className="mt-1 text-sm text-neutral-600">{isPro ? "Pro member" : "Free member"}</div>
-      </div>
+        <button
+          onClick={async () => {
+            await supabase.auth.signOut();
+            router.replace("/");
+          }}
+          className="mt-4 rounded-lg border px-3 py-2 text-sm"
+        >
+          Logout
+        </button>
+      </section>
     </main>
   );
-}
+}}

@@ -1,4 +1,5 @@
 import "./globals.css";
+import TopNav from "@/components/TopNav";
 
 export default function RootLayout({
   children,
@@ -7,17 +8,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>
-        <header className="flex justify-between items-center px-6 py-4 border-b">
-          <div className="font-semibold">Goodpick</div>
-          <nav className="flex gap-4 text-sm">
-            <a href="/scan">Scan</a>
-            <a href="/history">History</a>
-            <a href="/login">Login</a>
-          </nav>
-        </header>
-
-        {children}
+      <body className="min-h-screen bg-neutral-50">
+        <TopNav />
+        <div className="mx-auto max-w-xl">{children}</div>
       </body>
     </html>
   );
