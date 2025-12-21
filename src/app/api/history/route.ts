@@ -1,36 +1,20 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { getSessionKey } from "@/lib/session";
+import { supabaseServer } from "@/lib/supabase/server";
 
 export async function GET() {
-  try {
-    const sessionKey = await getSessionKey();
+  const supabase = await supabaseServer();
 
-    if (!sessionKey) {
-      return NextResponse.json({ ok: true, history: [] });
-    }
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
 
-    // ✅ 关键修复点
-    const supabase = supabaseAdmin();
+  const { data, error } = await supabase
+    .from("gp_scan_history")
+    .select("id,created_at,product_name,score,verdict,headline,notes_free,notes_pro,signals")
+    .eq("user_id", auth.user.id)
+    .order("created_at", { ascending: false })
+    .limit(1);
 
-    const { data, error } = await supabase
-      .from("gp_sessions")
-      .select("id, created_at, result")
-      .eq("session_key", sessionKey)
-      .order("created_at", { ascending: false })
-      .limit(20);
+  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
-    if (error) {
-      console.error(error);
-      return NextResponse.json({ ok: false }, { status: 500 });
-    }
-
-    return NextResponse.json({
-      ok: true,
-      history: data ?? [],
-    });
-  } catch (e) {
-    console.error(e);
-    return NextResponse.json({ ok: false }, { status: 500 });
-  }
+  return NextResponse.json({ ok: true, result: data?.[0] ?? null });
 }
