@@ -14,44 +14,50 @@ export default function LoginPage() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"login" | "signup">("login");
-  const [loading, setLoading] = useState(false);
+  const [loadingLogin, setLoadingLogin] = useState(false);
+  const [loadingSignup, setLoadingSignup] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleGoogle() {
-    setLoading(true);
     setError(null);
-
-    const { error } = await supabase.auth.signInWithOAuth({
+    await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
         redirectTo: `${location.origin}/auth/callback`,
       },
     });
-
-    if (error) {
-      setError(error.message);
-      setLoading(false);
-    }
   }
 
-  async function handleEmail() {
-    setLoading(true);
+  async function handleLogin() {
+    setLoadingLogin(true);
     setError(null);
 
-    const fn =
-      mode === "login"
-        ? supabase.auth.signInWithPassword
-        : supabase.auth.signUp;
-
-    const { error } = await fn({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
 
     if (error) {
       setError(error.message);
-      setLoading(false);
+      setLoadingLogin(false);
+      return;
+    }
+
+    router.push("/scan");
+  }
+
+  async function handleSignup() {
+    setLoadingSignup(true);
+    setError(null);
+
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+    });
+
+    if (error) {
+      setError(error.message);
+      setLoadingSignup(false);
       return;
     }
 
@@ -65,7 +71,6 @@ export default function LoginPage() {
 
         <button
           onClick={handleGoogle}
-          disabled={loading}
           className="w-full border rounded px-4 py-2 mb-4 hover:bg-neutral-50"
         >
           Continue with Google
@@ -94,22 +99,19 @@ export default function LoginPage() {
         )}
 
         <button
-          onClick={handleEmail}
-          disabled={loading}
-          className="w-full bg-black text-white rounded px-4 py-2 mb-3"
+          onClick={handleLogin}
+          disabled={loadingLogin}
+          className="w-full bg-black text-white rounded px-4 py-2 mb-2 disabled:opacity-50"
         >
-          {mode === "login" ? "Login" : "Create account"}
+          {loadingLogin ? "Logging in..." : "Login"}
         </button>
 
         <button
-          onClick={() =>
-            setMode(mode === "login" ? "signup" : "login")
-          }
-          className="w-full text-sm text-neutral-600 underline"
+          onClick={handleSignup}
+          disabled={loadingSignup}
+          className="w-full border rounded px-4 py-2 mb-3 disabled:opacity-50"
         >
-          {mode === "login"
-            ? "Create account"
-            : "Already have an account?"}
+          {loadingSignup ? "Creating account..." : "Create account"}
         </button>
 
         <div className="mt-4 text-center">
