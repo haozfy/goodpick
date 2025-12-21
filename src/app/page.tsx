@@ -2,6 +2,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type AnalyzeResult = {
   score: number;
@@ -37,11 +38,13 @@ function levelPill(level: "low" | "mid" | "high") {
 }
 
 export default function HomePage() {
+  const router = useRouter();
   const fileRef = useRef<HTMLInputElement | null>(null);
+
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<AnalyzeResult | null>(null);
-
+  const [error, setError] = useState<string | null>(null);
   const label = useMemo(() => (result ? scoreLabel(result.score) : null), [result]);
 
   const onPick = (file?: File) => {
@@ -49,29 +52,51 @@ export default function HomePage() {
     const url = URL.createObjectURL(file);
     setImageUrl(url);
     setResult(null);
+    setError(null);
   };
 
   const analyze = async () => {
-    if (!imageUrl) return;
-    setBusy(true);
-    try {
-      await new Promise((r) => setTimeout(r, 700));
-      const score = 62;
+    if (!imageUrl || busy) return;
 
-      setResult({
-        score,
-        label: scoreLabel(score),
-        negatives: [
-          { name: "Calories", valueText: "130 Cal / serving", hint: "A bit too caloric", level: "mid" },
-          { name: "Saturated fat", valueText: "1.5g / serving", hint: "A bit too fatty", level: "mid" },
-          { name: "Sodium", valueText: "170mg / serving", hint: "A bit too much sodium", level: "high" },
-        ],
-        positives: [
-          { name: "Protein", valueText: "6g", hint: "Excellent amount of protein" },
-          { name: "Fiber", valueText: "6g", hint: "Excellent amount of fiber" },
-          { name: "Sugar", valueText: "0g", hint: "No sugar" },
-        ],
+    setBusy(true);
+    setError(null);
+
+    try {
+      // ✅ 用真实 API（你后端要返回：{ ok: true, result } 或 { ok:false, code:"NEED_LOGIN"/"NEED_UPGRADE" }
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl }),
       });
+
+      // ✅ 统一门控：未登录 -> 去登录；次数用完 -> 去升级页
+      if (res.status === 401 || res.status === 403) {
+        router.push(`/login?next=${encodeURIComponent("/")}`);
+        return;
+      }
+      if (res.status === 402) {
+        router.push(`/pro?reason=limit`);
+        return;
+      }
+
+      const data = await res.json().catch(() => null);
+
+      if (!data?.ok) {
+        if (data?.code === "NEED_LOGIN") {
+          router.push(`/login?next=${encodeURIComponent("/")}`);
+          return;
+        }
+        if (data?.code === "NEED_UPGRADE") {
+          router.push(`/pro?reason=limit`);
+          return;
+        }
+        setError("Analyze failed. Please try again.");
+        return;
+      }
+
+      setResult(data.result as AnalyzeResult);
+    } catch {
+      setError("Network error. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -79,17 +104,21 @@ export default function HomePage() {
 
   return (
     <main className="mx-auto max-w-4xl space-y-4 p-4">
+      {/* Scan */}
       <section className="rounded-2xl border border-neutral-200 p-4 shadow-sm">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-xl font-semibold">Scan & Analyze</h1>
-            <p className="mt-1 text-sm text-neutral-500">Take a photo of the nutrition label / ingredients.</p>
+            <p className="mt-1 text-sm text-neutral-500">
+              Take a photo of the nutrition label / ingredients.
+            </p>
           </div>
 
           <button
             onClick={() => {
               setImageUrl(null);
               setResult(null);
+              setError(null);
             }}
             className="text-sm text-neutral-500 hover:text-black"
           >
@@ -139,15 +168,23 @@ export default function HomePage() {
               {busy ? "Analyzing…" : "Analyze"}
             </button>
           </div>
+
+          {error && <div className="text-sm text-red-600">{error}</div>}
+
+          {/* ✅ 如果你想要“免费 3 次”的提示文案，先放 UI，后端返回剩余次数时再替换 */}
+          <div className="text-xs text-neutral-500">
+            Free plan: 3 scans. Upgrade for unlimited.
+          </div>
         </div>
       </section>
 
+      {/* Result */}
       {result && (
         <section className="rounded-2xl border border-neutral-200 p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className={`h-2.5 w-2.5 rounded-full ${scoreDotClass(result.label)}`} />
-              <div className="text-sm font-semibold">{result.label}</div>
+              <div className="text-sm font-semibold">{label}</div>
             </div>
             <div className="text-sm text-neutral-500">{result.score}/100</div>
           </div>

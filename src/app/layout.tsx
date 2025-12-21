@@ -1,20 +1,22 @@
 // src/app/layout.tsx
 import "./globals.css";
-import TopNav from "@/app/components/TopNav";
+import TopNav from "@/components/TopNav";
+import { supabaseServer } from "@/lib/supabase/server";
 
-export const metadata = {
-  title: "Goodpick",
-};
-
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const supabase = await supabaseServer();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   return (
     <html lang="en">
       <body>
-        <TopNav />
+        <TopNav user={user} />
         {children}
       </body>
     </html>
