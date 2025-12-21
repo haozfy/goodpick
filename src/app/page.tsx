@@ -45,6 +45,7 @@ export default function HomePage() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<AnalyzeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
   const label = useMemo(() => (result ? scoreLabel(result.score) : null), [result]);
 
   const onPick = (file?: File) => {
@@ -62,14 +63,13 @@ export default function HomePage() {
     setError(null);
 
     try {
-      // ✅ 用真实 API（你后端要返回：{ ok: true, result } 或 { ok:false, code:"NEED_LOGIN"/"NEED_UPGRADE" }
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ imageUrl }),
       });
 
-      // ✅ 统一门控：未登录 -> 去登录；次数用完 -> 去升级页
+      // Gate
       if (res.status === 401 || res.status === 403) {
         router.push(`/login?next=${encodeURIComponent("/")}`);
         return;
@@ -109,9 +109,7 @@ export default function HomePage() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-xl font-semibold">Scan & Analyze</h1>
-            <p className="mt-1 text-sm text-neutral-500">
-              Take a photo of the nutrition label / ingredients.
-            </p>
+            <p className="mt-1 text-sm text-neutral-500">Take a photo of the nutrition label / ingredients.</p>
           </div>
 
           <button
@@ -171,10 +169,7 @@ export default function HomePage() {
 
           {error && <div className="text-sm text-red-600">{error}</div>}
 
-          {/* ✅ 如果你想要“免费 3 次”的提示文案，先放 UI，后端返回剩余次数时再替换 */}
-          <div className="text-xs text-neutral-500">
-            Free plan: 3 scans. Upgrade for unlimited.
-          </div>
+          <div className="text-xs text-neutral-500">Free plan: 3 scans. Upgrade for unlimited.</div>
         </div>
       </section>
 

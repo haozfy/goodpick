@@ -1,31 +1,51 @@
-// src/app/api/stripe/checkout/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe";
 import { supabaseServer } from "@/lib/supabase/server";
+import { supabaseService } from "@/lib/supabase/service";
 
 export const runtime = "nodejs";
 
-export async function POST(req: NextRequest) {
+export async function POST() {
   const supabase = await supabaseServer();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ ok: false }, { status: 401 });
 
-  if (!user) {
-    return NextResponse.json({ ok: false, error: "login_required" }, { status: 401 });
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL!;
+  const priceId = process.env.STRIPE_PRICE_ID_PRO!;
+  const svc = supabaseService();
+
+  // 取/建 stripe customer
+  const { data: ent } = await svc
+    .from("user_entitlements")
+    .select("stripe_customer_id")
+    .eq("user_id", user.id)
+    .single();
+
+  let customerId = ent?.stripe_customer_id ?? null;
+
+  if (!customerId) {
+    const customer = await stripe.customers.create({
+      email: user.email ?? undefined,
+      metadata: { user_id: user.id },
+    });
+    customerId = customer.id;
+
+    await svc
+      .from("user_entitlements")
+      .update({ stripe_customer_id: customerId })
+      .eq("user_id", user.id);
   }
-
-  const origin = req.headers.get("origin") ?? process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
-    payment_method_types: ["card"],
-    client_reference_id: user.id,
-    customer_email: user.email ?? undefined,
-    line_items: [{ price: process.env.STRIPE_PRICE_ID!, quantity: 1 }],
+    customer: customerId,
+    line_items: [{ price: priceId, quantity: 1 }],
+    success_url: `${siteUrl}/?paid=1`,
+    cancel_url: `${siteUrl}/pro?canceled=1`,
     allow_promotion_codes: true,
-    success_url: `${origin}/billing/success`,
-    cancel_url: `${origin}/billing/cancel`,
+    subscription_data: {
+      metadata: { user_id: user.id },
+    },
     metadata: { user_id: user.id },
   });
 
