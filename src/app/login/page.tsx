@@ -11,103 +11,115 @@ const supabase = createClient(
 
 export default function LoginPage() {
   const router = useRouter();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<"login" | "signup">("login");
   const [loading, setLoading] = useState(false);
-
-  async function handleLogin() {
-    setLoading(true);
-    setError(null);
-
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    setLoading(false);
-
-    if (error) {
-      setError(error.message);
-      return;
-    }
-
-    router.push("/scan");
-  }
-
-  async function handleSignup() {
-    setLoading(true);
-    setError(null);
-
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-
-    setLoading(false);
-
-    if (error) {
-      setError(error.message);
-      return;
-    }
-
-    router.push("/scan");
-  }
+  const [error, setError] = useState<string | null>(null);
 
   async function handleGoogle() {
-    await supabase.auth.signInWithOAuth({
+    setLoading(true);
+    setError(null);
+
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
         redirectTo: `${location.origin}/auth/callback`,
       },
     });
+
+    if (error) {
+      setError(error.message);
+      setLoading(false);
+    }
+  }
+
+  async function handleEmail() {
+    setLoading(true);
+    setError(null);
+
+    const fn =
+      mode === "login"
+        ? supabase.auth.signInWithPassword
+        : supabase.auth.signUp;
+
+    const { error } = await fn({
+      email,
+      password,
+    });
+
+    if (error) {
+      setError(error.message);
+      setLoading(false);
+      return;
+    }
+
+    router.push("/scan");
   }
 
   return (
-    <div style={{ maxWidth: 420, margin: "80px auto" }}>
-      <h2>Login</h2>
+    <div className="min-h-screen flex items-center justify-center bg-neutral-100">
+      <div className="w-full max-w-sm bg-white p-6 rounded-lg shadow">
+        <h1 className="text-xl font-semibold mb-4">Login</h1>
 
-      <button onClick={handleGoogle} style={{ width: "100%" }}>
-        Continue with Google
-      </button>
+        <button
+          onClick={handleGoogle}
+          disabled={loading}
+          className="w-full border rounded px-4 py-2 mb-4 hover:bg-neutral-50"
+        >
+          Continue with Google
+        </button>
 
-      <div style={{ margin: "16px 0", textAlign: "center" }}>or</div>
+        <div className="text-center text-sm text-neutral-400 mb-4">or</div>
 
-      <input
-        placeholder="Email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        style={{ width: "100%", marginBottom: 8 }}
-      />
+        <input
+          type="email"
+          placeholder="Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="w-full border rounded px-3 py-2 mb-2"
+        />
 
-      <input
-        placeholder="Password"
-        type="password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        style={{ width: "100%", marginBottom: 8 }}
-      />
+        <input
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="w-full border rounded px-3 py-2 mb-4"
+        />
 
-      {error && <p style={{ color: "red" }}>{error}</p>}
+        {error && (
+          <div className="text-sm text-red-600 mb-3">{error}</div>
+        )}
 
-      <button
-        onClick={handleLogin}
-        disabled={loading}
-        style={{ width: "100%", marginBottom: 8 }}
-      >
-        Login
-      </button>
+        <button
+          onClick={handleEmail}
+          disabled={loading}
+          className="w-full bg-black text-white rounded px-4 py-2 mb-3"
+        >
+          {mode === "login" ? "Login" : "Create account"}
+        </button>
 
-      <button
-        onClick={handleSignup}
-        disabled={loading}
-        style={{ width: "100%" }}
-      >
-        Create account
-      </button>
+        <button
+          onClick={() =>
+            setMode(mode === "login" ? "signup" : "login")
+          }
+          className="w-full text-sm text-neutral-600 underline"
+        >
+          {mode === "login"
+            ? "Create account"
+            : "Already have an account?"}
+        </button>
 
-      <div style={{ marginTop: 16, textAlign: "center" }}>
-        <a href="/scan">Continue as guest (limited)</a>
+        <div className="mt-4 text-center">
+          <a
+            href="/"
+            className="text-sm text-neutral-500 underline"
+          >
+            Continue as guest (limited)
+          </a>
+        </div>
       </div>
     </div>
   );
