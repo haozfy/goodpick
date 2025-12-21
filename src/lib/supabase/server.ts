@@ -1,8 +1,8 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
-export function supabaseServer() {
-  const cookieStore = cookies();
+export async function supabaseServer() {
+  const cookieStore = await cookies();
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -10,22 +10,21 @@ export function supabaseServer() {
     {
       cookies: {
         getAll() {
-          // ✅ 兼容 Next.js 16：cookies() 返回 Promise
-          return cookieStore.then((c) => c.getAll());
+          return cookieStore.getAll();
         },
         setAll(cookiesToSet) {
           try {
-            cookieStore.then((c) => {
-              cookiesToSet.forEach(({ name, value, options }) => {
-                c.set(name, value, options);
-              });
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
             });
-          } catch {}
+          } catch {
+            // Server Component / Route Handler 下忽略
+          }
         },
       },
     }
   );
 }
 
-// 兼容旧引用
+// 兼容旧代码
 export const supabaseServerFromCookieStore = supabaseServer;

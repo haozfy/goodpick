@@ -1,83 +1,53 @@
 "use client";
 
-import { useState } from "react";
-import { supabaseBrowser } from "@/lib/supabase/client";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export default function LoginPage() {
-  const supabase = supabaseBrowser();
-
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-
-  const loginWithGoogle = async () => {
+  async function signInWithGoogle() {
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback?next=/history`,
+        redirectTo: `${window.location.origin}/auth/callback`,
       },
     });
-  };
+  }
 
-  const loginWithPassword = async () => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) alert(error.message);
-    else window.location.href = "/history";
-  };
-
-  const createAccount = async () => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-    if (error) alert(error.message);
-    else alert("Account created. You can now log in.");
-  };
-
-  const forgotPassword = async () => {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/login`,
-    });
-    if (error) alert(error.message);
-    else alert("Check your email for reset link.");
-  };
+  async function goCheckout() {
+    const res = await fetch("/api/billing/checkout", { method: "POST" });
+    const data = await res.json();
+    if (data.url) window.location.href = data.url;
+  }
 
   return (
-    <main className="mx-auto max-w-md px-6 py-16 space-y-4">
+    <div className="min-h-screen flex flex-col items-center justify-center gap-4">
       <h1 className="text-2xl font-semibold">Login</h1>
 
-      <button onClick={loginWithGoogle} className="w-full border p-3 rounded">
+      <button
+        onClick={signInWithGoogle}
+        className="border px-6 py-2 rounded w-64"
+      >
         Continue with Google
       </button>
 
-      <input
-        className="w-full border p-3 rounded"
-        placeholder="Email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
+      <div className="text-sm text-gray-500 mt-2">
+        Login required for unlimited scans
+      </div>
 
-      <input
-        className="w-full border p-3 rounded"
-        placeholder="Password"
-        type="password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
-
-      <button onClick={loginWithPassword} className="w-full bg-black text-white p-3 rounded">
-        Login
+      <button
+        onClick={goCheckout}
+        className="bg-black text-white px-6 py-2 rounded w-64 mt-4"
+      >
+        Upgrade to Pro
       </button>
 
-      <button onClick={createAccount} className="w-full border p-3 rounded">
-        Create account
-      </button>
-
-      <button onClick={forgotPassword} className="text-sm underline">
-        Forgot password?
-      </button>
-    </main>
+      <a href="/" className="text-sm underline mt-4">
+        Continue as guest (limited)
+      </a>
+    </div>
   );
 }
