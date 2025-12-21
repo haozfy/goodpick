@@ -1,48 +1,51 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { useEffect, useState } from "react";
+import { supabaseClient } from "@/lib/supabase/client";
 
 export default function TopNav() {
-  const [user, setUser] = useState<any>(null);
+  const supabase = supabaseClient();
+  const [email, setEmail] = useState<string | null>(null);
 
   useEffect(() => {
+    let mounted = true;
+
     supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user);
+      if (!mounted) return;
+      setEmail(data.user?.email ?? null);
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      setUser(session?.user ?? null);
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setEmail(session?.user?.email ?? null);
     });
 
     return () => {
+      mounted = false;
       sub.subscription.unsubscribe();
     };
   }, []);
 
-  return (
-    <header className="border-b bg-white">
-      <div className="mx-auto flex max-w-xl items-center justify-between px-4 py-3">
-        <Link href="/" className="font-semibold">
-          Goodpick
-        </Link>
+  const logout = async () => {
+    await supabase.auth.signOut();
+    window.location.href = "/";
+  };
 
-        {user ? (
-          <Link href="/account" className="text-sm text-neutral-700">
-            Account
-          </Link>
-        ) : (
-          <Link href="/login" className="text-sm text-neutral-700">
-            Login
-          </Link>
+  return (
+    <header className="flex items-center justify-between border-b px-4 py-3">
+      <Link href="/" className="font-semibold">
+        Goodpick
+      </Link>
+
+      <nav className="flex items-center gap-4 text-sm">
+        <Link href="/">Scan</Link>
+        {email ? <Link href="/account">Account</Link> : <Link href="/login">Login</Link>}
+        {email && (
+          <button onClick={logout} className="text-red-600">
+            Logout
+          </button>
         )}
-      </div>
+      </nav>
     </header>
   );
 }

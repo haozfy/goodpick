@@ -5,90 +5,54 @@ import { useRef, useState } from "react";
 export default function HomePage() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<any>(null);
-
-  const analyze = async () => {
-    if (!imageUrl) return;
-    setBusy(true);
-
-    try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl }),
-      });
-
-      if (res.status === 401 || res.status === 403 || res.status === 402) {
-        window.location.href = "/login";
-        return;
-      }
-
-      const data = await res.json();
-      if (data.ok) setResult(data.result);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
     <main className="p-4 space-y-4">
-      <section className="rounded-xl border bg-white p-4">
-        <h1 className="text-lg font-semibold">Scan & Analyze</h1>
-        <p className="text-sm text-neutral-500">
-          Take a photo of nutrition label
-        </p>
+      <h1 className="text-xl font-semibold">Scan & Analyze</h1>
 
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (!f) return;
-            setImageUrl(URL.createObjectURL(f));
-            setResult(null);
-          }}
-        />
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) =>
+          setImageUrl(e.target.files?.[0] ? URL.createObjectURL(e.target.files[0]) : null)
+        }
+      />
 
-        {!imageUrl ? (
-          <button
-            onClick={() => fileRef.current?.click()}
-            className="mt-4 h-40 w-full rounded-xl border border-dashed"
-          >
-            📷 Take a photo
-          </button>
-        ) : (
-          <img
-            src={imageUrl}
-            className="mt-4 h-48 w-full rounded-xl object-cover"
-          />
-        )}
-
-        <div className="mt-4 flex gap-2">
-          <button
-            onClick={() => fileRef.current?.click()}
-            className="flex-1 rounded-lg border px-3 py-2 text-sm"
-          >
-            Retake
-          </button>
-
-          <button
-            onClick={analyze}
-            disabled={busy || !imageUrl}
-            className="flex-1 rounded-lg bg-black px-3 py-2 text-sm text-white disabled:opacity-40"
-          >
-            {busy ? "Analyzing…" : "Analyze"}
-          </button>
+      {!imageUrl ? (
+        <button
+          onClick={() => fileRef.current?.click()}
+          className="flex h-44 w-full flex-col items-center justify-center rounded-2xl border border-dashed border-neutral-300 bg-neutral-50 text-neutral-700 hover:border-neutral-400"
+        >
+          <div className="text-3xl">📷</div>
+          <div className="mt-2 text-sm font-medium">Take a photo</div>
+          <div className="mt-1 text-xs text-neutral-500">Best: straight, bright, full label</div>
+        </button>
+      ) : (
+        <div className="overflow-hidden rounded-2xl border border-neutral-200">
+          <img src={imageUrl} alt="preview" className="h-56 w-full object-cover" />
         </div>
-      </section>
-
-      {result && (
-        <section className="rounded-xl border bg-white p-4">
-          <pre className="text-xs">{JSON.stringify(result, null, 2)}</pre>
-        </section>
       )}
+
+      <div className="flex gap-3">
+        <button
+          onClick={() => {
+            setImageUrl(null);
+          }}
+          className="h-11 flex-1 rounded-xl border border-neutral-200 px-4 text-sm hover:border-neutral-400"
+        >
+          Reset
+        </button>
+
+        <button
+          onClick={() => fileRef.current?.click()}
+          className="h-11 flex-1 rounded-xl bg-black px-4 text-sm font-medium text-white"
+        >
+          {imageUrl ? "Retake" : "Choose photo"}
+        </button>
+      </div>
     </main>
   );
 }
