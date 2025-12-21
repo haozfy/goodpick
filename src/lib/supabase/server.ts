@@ -1,37 +1,23 @@
-// src/lib/supabase/server.ts
-import { createClient } from "@supabase/supabase-js";
-
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-function assertEnv(name: string, v: string | undefined) {
-  if (!v) throw new Error(`Missing env: ${name}`);
-}
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
 
 export function supabaseServer() {
-  assertEnv("NEXT_PUBLIC_SUPABASE_URL", SUPABASE_URL);
-  assertEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", SUPABASE_ANON_KEY);
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-    },
-  });
-}
+  const cookieStore = cookies();
 
-// 需要写库/校验 webhook 等“可信写入”时用（服务端 only）
-export function supabaseAdmin() {
-  assertEnv("NEXT_PUBLIC_SUPABASE_URL", SUPABASE_URL);
-  assertEnv("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_SERVICE_ROLE_KEY);
-
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY!, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
+  return createServerClient(url, key, {
+    cookies: {
+      get(name: string) {
+        return cookieStore.get(name)?.value;
+      },
+      set(name: string, value: string, options: any) {
+        cookieStore.set({ name, value, ...options });
+      },
+      remove(name: string, options: any) {
+        cookieStore.set({ name, value: "", ...options });
+      },
     },
   });
 }
