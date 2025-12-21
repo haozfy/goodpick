@@ -1,84 +1,74 @@
-// src/app/components/TopNav.tsx
 "use client";
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import type { User } from "@supabase/supabase-js";
 
 export default function TopNav() {
-  const supabase = supabaseBrowser;
-  const router = useRouter();
-  const pathname = usePathname();
-
-  const [user, setUser] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
+  const supabase = supabaseBrowser();
+  const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUser(data.user ?? null));
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      setUser(session?.user ?? null);
-      // ✅ 登录/登出后刷新当前页，让页眉立刻更新
-      router.refresh();
+    // 初始用户
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user ?? null);
     });
 
-    return () => sub.subscription.unsubscribe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // 监听登录状态变化
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => {
+      data.subscription.unsubscribe();
+    };
+  }, [supabase]);
 
   const logout = async () => {
-    if (loading) return;
-    setLoading(true);
     await supabase.auth.signOut();
-    alert("Logged out"); // ✅ 提示
-    router.push("/");    // ✅ 回首页（scan）
-    router.refresh();
-    setLoading(false);
-  };
-
-  const NavLink = ({ href, label }: { href: string; label: string }) => {
-    const active = pathname === href;
-    return (
-      <Link
-        href={href}
-        className={[
-          "text-sm",
-          active ? "text-black font-medium" : "text-neutral-700 hover:text-black",
-        ].join(" ")}
-      >
-        {label}
-      </Link>
-    );
+    window.location.href = "/";
   };
 
   return (
     <header className="border-b bg-white">
       <div className="mx-auto flex max-w-4xl items-center justify-between p-4">
+        {/* Brand */}
         <Link href="/" className="font-semibold">
           Goodpick
         </Link>
 
-        <nav className="flex items-center gap-6">
-          <NavLink href="/" label="Scan" />
-          <NavLink href="/history" label="History" />
-          <NavLink href="/better" label="Better Alternatives" />
+        {/* Main Nav */}
+        <nav className="flex items-center gap-6 text-sm">
+          <Link href="/" className="text-neutral-700 hover:text-black">
+            Scan
+          </Link>
+          <Link href="/history" className="text-neutral-700 hover:text-black">
+            History
+          </Link>
+          <Link href="/better" className="text-neutral-700 hover:text-black">
+            Better Alternatives
+          </Link>
         </nav>
 
-        <div className="flex items-center gap-4">
+        {/* Account */}
+        <div className="flex items-center gap-4 text-sm">
           {user ? (
             <>
-              <NavLink href="/account" label="Account" />
+              <Link href="/account" className="text-neutral-700 hover:text-black">
+                Account
+              </Link>
               <button
                 onClick={logout}
-                disabled={loading}
-                className="text-sm text-neutral-700 hover:text-black disabled:opacity-50"
+                className="text-neutral-700 hover:text-black"
               >
-                {loading ? "Logging out…" : "Logout"}
+                Logout
               </button>
             </>
           ) : (
-            <NavLink href="/login" label="Login" />
+            <Link href="/login" className="text-neutral-700 hover:text-black">
+              Login
+            </Link>
           )}
         </div>
       </div>
