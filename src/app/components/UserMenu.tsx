@@ -1,9 +1,11 @@
 // src/components/UserMenu.tsx
 import Link from "next/link";
-import { supabaseServer } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server"; // ✅ 1. 改这里
 
 export default async function UserMenu() {
-  const supabase = await supabaseServer();
+  // ✅ 2. 改这里
+  const supabase = await createClient();
+  
   const {
     data: { user },
   } = await supabase.auth.getUser();

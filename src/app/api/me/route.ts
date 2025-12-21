@@ -1,21 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { supabaseServer } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server"; // ✅ 1. 引入服务端 Client
+import { supabaseAdmin } from "@/lib/supabase/admin"; // ✅ 2. 引入 Admin Client
 
 export const runtime = "nodejs";
 const LIMIT = 3;
 const COOKIE_NAME = "gp_guest";
 
-function supabaseAdmin() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } }
-  );
-}
+// ❌ 删除了这里本地定义的 function supabaseAdmin() ...
+// 直接复用 import 进来的，保持代码整洁
 
 async function getUsed(key: string) {
+  // ✅ 3. 调用引入的 Admin 函数
   const admin = supabaseAdmin();
+  
   const { data, error } = await admin
     .from("gp_quota")
     .select("used")
@@ -27,7 +24,9 @@ async function getUsed(key: string) {
 }
 
 export async function GET(req: NextRequest) {
-  const supabase = await supabaseServer();
+  // ✅ 4. 改为异步 await createClient()
+  const supabase = await createClient();
+  
   const { data: auth } = await supabase.auth.getUser();
   const user = auth.user;
 
@@ -35,7 +34,7 @@ export async function GET(req: NextRequest) {
     const admin = supabaseAdmin();
     const { data: prof } = await admin
       .from("profiles")
-      .select("plan,is_pro")
+      .select("plan,is_pro") // 确认你的表里是叫 is_pro 还是 plan，这里保留了原逻辑
       .eq("id", user.id)
       .single();
 

@@ -1,18 +1,21 @@
 import { NextResponse } from "next/server";
-import { supabaseServer } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server"; // ✅ 1. 改这里：引入 createClient
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST() {
-  const supabase = supabaseServer();
+  // ✅ 2. 改这里：必须加 await
+  const supabase = await createClient();
+  
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
     return NextResponse.json({ ok: false, reason: "login_required" }, { status: 401 });
   }
 
+  // Admin 客户端初始化 (之前改过的 supabaseAdmin 是个函数)
   const svc = supabaseAdmin();
 
   const { data: ent } = await svc
@@ -30,12 +33,19 @@ export async function POST() {
     if (used >= limit) {
       return NextResponse.json({ ok: false, reason: "upgrade_required" }, { status: 402 });
     }
+    
+    // 扣费逻辑：更新使用次数
+    // 建议加上 updated_at 记录最后一次扫描时间
     await svc
       .from("user_entitlements")
-      .update({ scans_used: used + 1, updated_at: new Date().toISOString() })
+      .update({ 
+        scans_used: used + 1, 
+        updated_at: new Date().toISOString() 
+      })
       .eq("user_id", user.id);
   }
 
+  // 模拟返回结果
   const result = { score: 62, label: "Good", negatives: [], positives: [] };
   return NextResponse.json({ ok: true, result });
 }

@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
-import { supabaseServer } from "@/lib/supabase/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/server"; // ✅ 1. 改这里
+import { supabaseAdmin } from "@/lib/supabase/admin"; // ✅ 2. 改这里
 
 export async function GET() {
-  const supabase = await supabaseServer();
+  // ✅ 3. 改为异步创建客户端
+  const supabase = await createClient();
+  
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Guest
+  // Guest (未登录)
   if (!user) {
     return NextResponse.json({
       kind: "guest",
@@ -16,10 +18,8 @@ export async function GET() {
     });
   }
 
-  const admin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
+  // ✅ 4. 使用封装好的 Admin 客户端 (无需再手动传 Key)
+  const admin = supabaseAdmin();
 
   const { data: profile } = await admin
     .from("profiles")

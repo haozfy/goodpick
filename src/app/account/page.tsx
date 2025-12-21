@@ -1,8 +1,9 @@
 // src/app/account/page.tsx
-import { supabaseServer } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server"; // ✅ 1. 改这里：引入正确的函数名
 
 export default async function AccountPage() {
-  const supabase = await supabaseServer();
+  const supabase = await createClient(); // ✅ 2. 改这里：调用 createClient
+  
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -17,6 +18,7 @@ export default async function AccountPage() {
       </div>
 
       <form action="/auth/signout" method="post">
+        {/* 注意：这里的 action 路径要确保对应你 api 里的路由路径 */}
         <button type="submit" className="h-11 rounded-xl bg-black px-4 text-sm font-medium text-white">
           Logout
         </button>
