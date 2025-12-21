@@ -1,10 +1,10 @@
 // src/lib/supabase/server.ts
+import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
-export function supabaseServerFromCookieStore(cookieStore: {
-  getAll: () => { name: string; value: string }[];
-  set: (name: string, value: string, options?: any) => void;
-}) {
+export function supabaseServer() {
+  const cookieStore = cookies();
+
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -14,11 +14,16 @@ export function supabaseServerFromCookieStore(cookieStore: {
           return cookieStore.getAll();
         },
         setAll(cookiesToSet) {
-          for (const { name, value, options } of cookiesToSet) {
-            cookieStore.set(name, value, options);
-          }
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
+          } catch {}
         },
       },
     }
   );
 }
+
+// ✅ 加这一行
+export const supabaseServerFromCookieStore = supabaseServer;
