@@ -1,14 +1,14 @@
-// src/app/api/analyze/route.ts
-import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { supabaseServer } from "@/lib/supabase/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { supabaseServer } from "@/lib/supabase/server";
+import { randomUUID } from "crypto";
 
-export const runtime = "nodejs"; // 避免 edge 环境下某些依赖不兼容
+export const runtime = "nodejs";
 
 const LIMIT = 3;
+const COOKIE_NAME = "gp_guest";
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
-// 仅服务端用（Service Role）
 function supabaseAdmin() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -17,90 +17,129 @@ function supabaseAdmin() {
   );
 }
 
-async function enforceGuestQuota() {
-  const guestId = cookies().get("gp_guest")?.value;
-
-  if (!guestId) {
-    return { ok: false as const, status: 400, error: "no_guest_cookie" };
-  }
-
+async function enforceQuota(key: string) {
   const admin = supabaseAdmin();
+  const { data, error } = await admin.rpc("gp_enforce_quota", {
+    p_key: key,
+    p_limit: LIMIT,
+  });
 
-  // 确保有记录
-  const { data: row, error: upsertErr } = await admin
-    .from("gp_guest_quota")
-    .upsert({ guest_id: guestId }, { onConflict: "guest_id" })
-    .select("used")
-    .single();
+  if (error) return { ok: false as const, status: 500, error: error.message };
 
-  if (upsertErr) {
-    return { ok: false as const, status: 500, error: upsertErr.message };
-  }
-
-  const used = row?.used ?? 0;
-
-  if (used >= LIMIT) {
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row?.ok) {
     return {
       ok: false as const,
-      status: 402,
-      error: "guest_limit_reached",
-      limit: LIMIT,
-      used,
+      status: 429,
+      error: row?.error ?? "limit_reached",
+      used: row?.used ?? LIMIT,
+      limit: row?.quota_limit ?? LIMIT,
     };
   }
-
-  // 扣 1 次（简单版本：读-改-写；足够用）
-  const { error: incErr } = await admin
-    .from("gp_guest_quota")
-    .update({ used: used + 1 })
-    .eq("guest_id", guestId);
-
-  if (incErr) {
-    return { ok: false as const, status: 500, error: incErr.message };
-  }
-
-  return { ok: true as const, guestId, usedBefore: used, limit: LIMIT };
+  return { ok: true as const, used: row.used, limit: row.quota_limit };
 }
 
-export async function POST(req: Request) {
-  try {
-    // 1) 先判断登录态：登录用户不限次
-    const supabase = await supabaseServer();
-    const { data: authData } = await supabase.auth.getUser();
-    const user = authData.user;
+async function isPaid(userId: string) {
+  const admin = supabaseAdmin();
+  const { data, error } = await admin
+    .from("profiles")
+    .select("plan,is_pro")
+    .eq("id", userId)
+    .single();
 
-    // 2) 未登录：执行“每设备 3 次”限制
-    if (!user) {
-      const quota = await enforceGuestQuota();
-      if (!quota.ok) {
-        return NextResponse.json(
-          { ok: false, error: quota.error, ...(quota as any) },
-          { status: quota.status }
-        );
+  if (error) return false;
+  return data?.is_pro === true || data?.plan === "pro";
+}
+
+async function yourAnalyze(body: any) {
+  // TODO: 这里接你的食品判断逻辑/模型调用
+  return {
+    verdict: "unknown",
+    reasons: ["TODO: implement yourAnalyze()"],
+    suggestion: "TODO",
+    raw: body,
+  };
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const supabase = await supabaseServer();
+    const { data: auth } = await supabase.auth.getUser();
+    const user = auth.user;
+
+    // A) 登录用户
+    if (user) {
+      const paid = await isPaid(user.id);
+      if (!paid) {
+        const quota = await enforceQuota(`u_${user.id}`);
+        if (!quota.ok) {
+          return NextResponse.json(
+            { ok: false, gate: "login_not_paid_limited", ...quota },
+            { status: quota.status }
+          );
+        }
       }
+
+      const body = await req.json();
+      const result = await yourAnalyze(body);
+
+      return NextResponse.json({
+        ok: true,
+        gate: paid ? "paid_unlimited" : "login_not_paid_limited",
+        user_id: user.id,
+        result,
+      });
     }
 
-    // 3) 你的 analyze 输入
+    // B) 未登录：guest cookie
+    let guestId = req.cookies.get(COOKIE_NAME)?.value ?? null;
+    let shouldSet = false;
+
+    if (!guestId) {
+      guestId = randomUUID();
+      shouldSet = true;
+    }
+
+    const quota = await enforceQuota(`g_${guestId}`);
+    if (!quota.ok) {
+      const res = NextResponse.json(
+        { ok: false, gate: "guest_limited", ...quota },
+        { status: quota.status }
+      );
+      if (shouldSet) {
+        res.cookies.set(COOKIE_NAME, guestId, {
+          httpOnly: true,
+          sameSite: "lax",
+          secure: true,
+          path: "/",
+          maxAge: COOKIE_MAX_AGE,
+        });
+      }
+      return res;
+    }
+
     const body = await req.json();
+    const result = await yourAnalyze(body);
 
-    // ============================
-    // ✅ 把你原来的分析逻辑放这里
-    // 例如：
-    // const result = await analyzeFood(body);
-    // return NextResponse.json({ ok: true, result });
-    // ============================
-
-    // 临时示例返回（你替换掉）
-    return NextResponse.json({
+    const res = NextResponse.json({
       ok: true,
-      user_id: user?.id ?? null,
-      message: "analyze ok (replace with your real analyze logic)",
-      input: body,
+      gate: "guest_limited",
+      guest_id: guestId,
+      result,
     });
+
+    if (shouldSet && guestId) {
+      res.cookies.set(COOKIE_NAME, guestId, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: true,
+        path: "/",
+        maxAge: COOKIE_MAX_AGE,
+      });
+    }
+
+    return res;
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message ?? "unknown_error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: e?.message ?? "unknown_error" }, { status: 500 });
   }
 }

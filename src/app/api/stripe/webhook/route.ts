@@ -1,79 +1,89 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+import { stripe } from "@/lib/stripe";
 import Stripe from "stripe";
-import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2024-06-20" as any,
-});
+function supabaseAdmin() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false } }
+  );
+}
 
-export async function POST(req: Request) {
+async function setProByUserId(userId: string, customerId?: string | null, subId?: string | null) {
+  const admin = supabaseAdmin();
+  const { error } = await admin
+    .from("profiles")
+    .update({
+      is_pro: true,
+      plan: "pro",
+      stripe_customer_id: customerId ?? null,
+      stripe_subscription_id: subId ?? null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", userId);
+  if (error) throw new Error(error.message);
+}
+
+async function setFreeByCustomerId(customerId: string) {
+  const admin = supabaseAdmin();
+  const { error } = await admin
+    .from("profiles")
+    .update({
+      is_pro: false,
+      plan: "free",
+      stripe_subscription_id: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("stripe_customer_id", customerId);
+  if (error) throw new Error(error.message);
+}
+
+export async function POST(req: NextRequest) {
   const sig = req.headers.get("stripe-signature");
-  const body = await req.text();
+  if (!sig) return NextResponse.json({ ok: false, error: "missing_signature" }, { status: 400 });
+
+  const rawBody = await req.text();
 
   let event: Stripe.Event;
   try {
-    event = stripe.webhooks.constructEvent(
-      body,
-      sig!,
-      process.env.STRIPE_WEBHOOK_SECRET!
-    );
+    event = stripe.webhooks.constructEvent(rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET!);
   } catch {
-    return NextResponse.json({ ok: false }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "invalid_signature" }, { status: 400 });
   }
 
-  const admin = supabaseAdmin();
+  try {
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object as Stripe.Checkout.Session;
 
-  const upsertSub = async (userId: string, patch: any) => {
-    await admin.from("gp_user_subscriptions").upsert(
-      { user_id: userId, ...patch, updated_at: new Date().toISOString() },
-      { onConflict: "user_id" }
-    );
-  };
+      const userId =
+        (session.metadata?.user_id as string | undefined) ||
+        (session.client_reference_id as string | undefined);
 
-  if (event.type === "checkout.session.completed") {
-    const s = event.data.object as Stripe.Checkout.Session;
-    const userId = (s.metadata?.user_id || s.client_reference_id) as
-      | string
-      | undefined;
+      if (userId) {
+        const customerId =
+          typeof session.customer === "string" ? session.customer : session.customer?.id;
 
-    if (userId) {
-      await upsertSub(userId, {
-        is_pro: true,
-        stripe_customer_id: typeof s.customer === "string" ? s.customer : null,
-        stripe_subscription_id:
-          typeof s.subscription === "string" ? s.subscription : null,
-      });
+        const subId =
+          typeof session.subscription === "string"
+            ? session.subscription
+            : session.subscription?.id;
+
+        await setProByUserId(userId, customerId ?? null, subId ?? null);
+      }
     }
-  }
 
-  if (
-    event.type === "customer.subscription.updated" ||
-    event.type === "customer.subscription.deleted"
-  ) {
-    const sub = event.data.object as Stripe.Subscription;
-    const userId = sub.metadata?.user_id;
-
-    if (userId) {
-      const active = sub.status === "active" || sub.status === "trialing";
-
-      // ✅ 兼容拿 period end：优先 item-level，其次 root-level，最后 null
-      const periodEndUnix =
-        (sub.items?.data?.[0] as any)?.current_period_end ??
-        (sub as any).current_period_end ??
-        null;
-
-      await upsertSub(userId, {
-        is_pro: active,
-        stripe_subscription_id: sub.id,
-        stripe_price_id: sub.items?.data?.[0]?.price?.id ?? null,
-        current_period_end: periodEndUnix
-          ? new Date(periodEndUnix * 1000).toISOString()
-          : null,
-      });
+    if (event.type === "customer.subscription.deleted") {
+      const sub = event.data.object as Stripe.Subscription;
+      const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
+      await setFreeByCustomerId(customerId);
     }
-  }
 
-  return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e?.message ?? "webhook_error" }, { status: 500 });
+  }
 }
