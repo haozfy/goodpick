@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type AnalyzeResult = {
   score: number; // 0-100
@@ -36,10 +37,13 @@ function levelPill(level: "low" | "mid" | "high") {
 }
 
 export default function HomePage() {
+  const router = useRouter();
   const fileRef = useRef<HTMLInputElement | null>(null);
+
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<AnalyzeResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const label = useMemo(() => (result ? scoreLabel(result.score) : null), [result]);
 
@@ -48,38 +52,49 @@ export default function HomePage() {
     const url = URL.createObjectURL(file);
     setImageUrl(url);
     setResult(null);
+    setError(null);
   };
 
   const analyze = async () => {
     if (!imageUrl) return;
     setBusy(true);
-    try {
-      // TODO: 替换为你的真实 API：/api/analyze-photo
-      // 这里先用 mock 让 UI 跑起来
-      await new Promise((r) => setTimeout(r, 700));
-      const score = 62;
+    setError(null);
 
-      setResult({
-        score,
-        label: scoreLabel(score),
-        negatives: [
-          { name: "Calories", valueText: "130 Cal / serving", hint: "A bit too caloric", level: "mid" },
-          { name: "Saturated fat", valueText: "1.5g / serving", hint: "A bit too fatty", level: "mid" },
-          { name: "Sodium", valueText: "170mg / serving", hint: "A bit too much sodium", level: "high" },
-        ],
-        positives: [
-          { name: "Protein", valueText: "6g", hint: "Excellent amount of protein" },
-          { name: "Fiber", valueText: "6g", hint: "Excellent amount of fiber" },
-          { name: "Sugar", valueText: "0g", hint: "No sugar" },
-        ],
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl }),
       });
+
+      // 🔒 门控处理
+      if (res.status === 401 || res.status === 403) {
+        router.push("/login");
+        return;
+      }
+
+      if (res.status === 402 || res.status === 429) {
+        router.push("/login?upgrade=1");
+        return;
+      }
+
+      const data = await res.json();
+      if (!data.ok) {
+        setError("Analyze failed");
+        return;
+      }
+
+      // 👉 期望后端返回 result
+      setResult(data.result as AnalyzeResult);
+    } catch {
+      setError("Network error");
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <main className="space-y-4">
+    <main className="space-y-4 p-4">
       {/* 主卡片：拍照/上传 */}
       <section className="rounded-2xl border border-neutral-200 p-4 shadow-sm">
         <div className="flex items-start justify-between gap-3">
@@ -94,6 +109,7 @@ export default function HomePage() {
             onClick={() => {
               setImageUrl(null);
               setResult(null);
+              setError(null);
             }}
             className="text-sm text-neutral-500 hover:text-black"
           >
@@ -122,7 +138,6 @@ export default function HomePage() {
             </button>
           ) : (
             <div className="overflow-hidden rounded-2xl border border-neutral-200">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={imageUrl} alt="preview" className="h-56 w-full object-cover" />
             </div>
           )}
@@ -143,10 +158,12 @@ export default function HomePage() {
               {busy ? "Analyzing…" : "Analyze"}
             </button>
           </div>
+
+          {error && <div className="text-sm text-red-600">{error}</div>}
         </div>
       </section>
 
-      {/* 结果卡片：像 Yuka 的 “分数 + negatives/positives” */}
+      {/* 结果卡片 */}
       {result && (
         <section className="rounded-2xl border border-neutral-200 p-4 shadow-sm">
           <div className="flex items-center justify-between">
