@@ -14,7 +14,7 @@ export default function LoginPage() {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [error, setError] = useState<string | null>(null);
 
-  async function signInWithGoogle() {
+  async function google() {
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
@@ -23,7 +23,7 @@ export default function LoginPage() {
     });
   }
 
-  async function signInWithEmail() {
+  async function login() {
     setError(null);
     const { error } = await supabase.auth.signInWithPassword({
       email,
@@ -32,7 +32,7 @@ export default function LoginPage() {
     if (error) setError(error.message);
   }
 
-  async function signUpWithEmail() {
+  async function signup() {
     setError(null);
     const { error } = await supabase.auth.signUp({
       email,
@@ -44,19 +44,13 @@ export default function LoginPage() {
     if (error) setError(error.message);
   }
 
-  async function goCheckout() {
-    const res = await fetch("/api/billing/checkout", { method: "POST" });
-    const data = await res.json();
-    if (data.url) window.location.href = data.url;
-  }
-
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-4">
       <h1 className="text-2xl font-semibold">Login</h1>
 
-      {/* Google OAuth */}
+      {/* Google */}
       <button
-        onClick={signInWithGoogle}
+        onClick={google}
         className="border px-6 py-2 rounded w-64"
       >
         Continue with Google
@@ -64,7 +58,7 @@ export default function LoginPage() {
 
       <div className="text-sm text-gray-400">or</div>
 
-      {/* Email / Password */}
+      {/* Email */}
       <input
         className="border px-3 py-2 rounded w-64"
         placeholder="Email"
@@ -85,10 +79,10 @@ export default function LoginPage() {
       {mode === "login" ? (
         <>
           <button
-            onClick={signInWithEmail}
+            onClick={login}
             className="bg-black text-white px-6 py-2 rounded w-64"
           >
-            Login with Email
+            Login
           </button>
 
           <button
@@ -101,10 +95,10 @@ export default function LoginPage() {
       ) : (
         <>
           <button
-            onClick={signUpWithEmail}
+            onClick={signup}
             className="bg-black text-white px-6 py-2 rounded w-64"
           >
-            Sign up with Email
+            Sign up
           </button>
 
           <button
@@ -116,17 +110,7 @@ export default function LoginPage() {
         </>
       )}
 
-      <div className="text-sm text-gray-500 mt-2">
-        Login required for unlimited scans
-      </div>
-
-      <button
-        onClick={goCheckout}
-        className="border px-6 py-2 rounded w-64 mt-2"
-      >
-        Upgrade to Pro
-      </button>
-
+      {/* Guest 只是回首页，不碰 Supabase */}
       <a href="/" className="text-sm underline mt-2">
         Continue as guest (limited)
       </a>
