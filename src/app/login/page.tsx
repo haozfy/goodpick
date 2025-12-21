@@ -1,127 +1,109 @@
 // src/app/login/page.tsx
 "use client";
 
-import { useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
-export default function LoginPage() {
-  const sp = useSearchParams();
-  const next = useMemo(() => sp.get("next") || "/", [sp]);
+function LoginInner() {
+  const router = useRouter();
+  const params = useSearchParams();
+  const supabase = supabaseBrowser();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const signInWithGoogle = async () => {
+  // 已登录直接回首页
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) {
+        router.replace("/");
+      }
+    });
+  }, [router, supabase]);
+
+  const signInEmail = async () => {
     setBusy(true);
-    setMsg(null);
-    try {
-      const supabase = supabaseBrowser();
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
-        },
-      });
-      if (error) setMsg(error.message);
-    } finally {
-      setBusy(false);
+    setError(null);
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    setBusy(false);
+
+    if (error) {
+      setError(error.message);
+      return;
     }
+
+    router.replace("/");
   };
 
-  const signInWithEmail = async () => {
-    setBusy(true);
-    setMsg(null);
-    try {
-      const supabase = supabaseBrowser();
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        setMsg(error.message);
-        return;
-      }
-      window.location.href = next;
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const signUpWithEmail = async () => {
-    setBusy(true);
-    setMsg(null);
-    try {
-      const supabase = supabaseBrowser();
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
-        },
-      });
-      if (error) {
-        setMsg(error.message);
-        return;
-      }
-      setMsg("Check your email to confirm.");
-    } finally {
-      setBusy(false);
-    }
+  const signInGoogle = async () => {
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${location.origin}/auth/callback`,
+      },
+    });
   };
 
   return (
-    <main className="mx-auto max-w-md space-y-4 p-6">
-      <h1 className="text-2xl font-semibold">Login</h1>
+    <main className="mx-auto max-w-sm p-6 space-y-4">
+      <h1 className="text-xl font-semibold">Login</h1>
 
       <button
-        onClick={signInWithGoogle}
-        disabled={busy}
-        className="h-11 w-full rounded-xl border border-neutral-200 px-4 text-sm hover:border-neutral-400 disabled:opacity-50"
+        onClick={signInGoogle}
+        className="w-full h-11 rounded-xl border"
       >
         Continue with Google
       </button>
 
-      <div className="text-center text-xs text-neutral-500">or</div>
+      <div className="text-center text-sm text-neutral-400">or</div>
 
-      <div className="space-y-3 rounded-2xl border border-neutral-200 p-4">
-        <input
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="email"
-          className="h-11 w-full rounded-xl border border-neutral-200 px-3 text-sm"
-          autoComplete="email"
-        />
-        <input
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="password"
-          className="h-11 w-full rounded-xl border border-neutral-200 px-3 text-sm"
-          autoComplete="current-password"
-          type="password"
-        />
+      <input
+        className="w-full h-11 rounded-xl border px-3"
+        placeholder="Email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+      />
 
-        <button
-          onClick={signInWithEmail}
-          disabled={busy}
-          className="h-11 w-full rounded-xl bg-black px-4 text-sm font-medium text-white disabled:opacity-50"
-        >
-          Login
-        </button>
+      <input
+        className="w-full h-11 rounded-xl border px-3"
+        placeholder="Password"
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+      />
 
-        <button
-          onClick={signUpWithEmail}
-          disabled={busy}
-          className="h-11 w-full rounded-xl border border-neutral-200 px-4 text-sm hover:border-neutral-400 disabled:opacity-50"
-        >
-          Create account
-        </button>
+      {error && <div className="text-sm text-red-600">{error}</div>}
 
-        <a href="/reset" className="block text-sm text-neutral-700 underline">
-          Forgot password?
-        </a>
+      <button
+        onClick={signInEmail}
+        disabled={busy}
+        className="w-full h-11 rounded-xl bg-black text-white disabled:opacity-40"
+      >
+        Login
+      </button>
 
-        {msg && <div className="text-sm text-neutral-700">{msg}</div>}
-      </div>
+      <a
+        href="/reset"
+        className="block text-center text-sm text-neutral-500"
+      >
+        Forgot password?
+      </a>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginInner />
+    </Suspense>
   );
 }
