@@ -5,11 +5,16 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 export const runtime = "nodejs";
 
 export async function POST() {
-  const supabase = supabaseServer();
-  const { data: { user } } = await supabase.auth.getUser();
+  const supabase = await supabaseServer();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   if (!user) {
-    return NextResponse.json({ ok: false, reason: "login_required" }, { status: 401 });
+    return NextResponse.json(
+      { ok: false, reason: "login_required" },
+      { status: 401 }
+    );
   }
 
   const svc = supabaseAdmin();
@@ -25,11 +30,17 @@ export async function POST() {
   const limit = ent?.scans_limit ?? 3;
 
   if (plan !== "pro" && used >= limit) {
-    return NextResponse.json({ ok: false, reason: "upgrade_required" }, { status: 402 });
+    return NextResponse.json(
+      { ok: false, reason: "upgrade_required" },
+      { status: 402 }
+    );
   }
 
   if (plan !== "pro") {
-    await svc.from("user_entitlements").update({ scans_used: used + 1 }).eq("user_id", user.id);
+    await svc
+      .from("user_entitlements")
+      .update({ scans_used: used + 1 })
+      .eq("user_id", user.id);
   }
 
   const result = { score: 62, label: "Good", negatives: [], positives: [] };

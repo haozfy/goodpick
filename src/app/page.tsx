@@ -3,9 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-
-// 如果你已有 supabase client 工具函数，用你自己的路径替换
-import { createClient } from "@/lib/supabase/client";
+import { supabaseBrowser } from "@/lib/supabase/client";
 
 type ScanResponse =
   | { scanId: string }
@@ -18,7 +16,7 @@ function cn(...xs: Array<string | false | null | undefined>) {
 
 export default function HomePage() {
   const router = useRouter();
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = useMemo(() => supabaseBrowser(), []);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -86,14 +84,13 @@ export default function HomePage() {
         return;
       }
 
-      // 你也可以改成 data.id / data.scan_id，按你后端实际返回调整
       if ("scanId" in data && data.scanId) {
         router.push(`/scan/result?scanId=${encodeURIComponent(data.scanId)}`);
         return;
       }
 
       setErr(("message" in data && data.message) || "扫描失败，请稍后重试。");
-    } catch (e) {
+    } catch {
       setErr("网络或服务器错误，请稍后重试。");
     } finally {
       setBusy(false);
@@ -102,7 +99,6 @@ export default function HomePage() {
 
   return (
     <div className="min-h-dvh bg-white text-zinc-900">
-      {/* 顶部条：极简，不要导航 */}
       <header className="mx-auto flex w-full max-w-3xl items-center justify-between px-4 py-4">
         <Link href="/" className="flex items-center gap-2">
           <div className="h-9 w-9 rounded-xl bg-zinc-900" />
@@ -136,7 +132,6 @@ export default function HomePage() {
       </header>
 
       <main className="mx-auto w-full max-w-3xl px-4 pb-10">
-        {/* Hero：一句话 + 一个动作 */}
         <section className="mt-6">
           <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
             拍一下，看看这东西值不值得吃
@@ -145,7 +140,6 @@ export default function HomePage() {
             不讲营养学大道理，直接给你结论：✅可以 / ⚠️谨慎 / ❌不推荐
           </p>
 
-          {/* 主卡片：拍/传 + 预览 + 扫描 */}
           <div
             className={cn(
               "mt-6 rounded-2xl border border-zinc-200 bg-zinc-50 p-4",
@@ -247,13 +241,12 @@ export default function HomePage() {
                   </button>
 
                   {err && (
-                    <div className="rounded-xl border border-red-200 bg-red-50 px-l-4 px-4 py-3 text-sm text-red-700">
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                       {err}
                     </div>
                   )}
                 </div>
 
-                {/* 小提示：不解释太多 */}
                 <div className="mt-4 rounded-xl bg-white p-3 text-xs text-zinc-600 border border-zinc-200">
                   小提示：拍食品正面+配料表更准。免费用户可用 3 次，升级后无限次。
                 </div>
@@ -263,7 +256,6 @@ export default function HomePage() {
         </section>
       </main>
 
-      {/* 次数用尽弹窗 */}
       {showLimit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">

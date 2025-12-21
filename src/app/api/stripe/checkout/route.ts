@@ -6,12 +6,23 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 export const runtime = "nodejs";
 
 export async function POST() {
-  const supabase = supabaseServer();
-  const { data: { user } } = await supabase.auth.getUser();
+  const supabase = await supabaseServer();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   if (!user) return NextResponse.json({ ok: false }, { status: 401 });
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL!;
-  const priceId = process.env.STRIPE_PRICE_ID_PRO!;
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  const priceId = process.env.STRIPE_PRICE_ID_PRO;
+
+  if (!siteUrl || !priceId) {
+    return NextResponse.json(
+      { ok: false, reason: "missing_env" },
+      { status: 500 }
+    );
+  }
+
   const svc = supabaseAdmin();
 
   const { data: ent } = await svc
@@ -29,7 +40,8 @@ export async function POST() {
     });
     customerId = customer.id;
 
-    await svc.from("user_entitlements")
+    await svc
+      .from("user_entitlements")
       .update({ stripe_customer_id: customerId })
       .eq("user_id", user.id);
   }
