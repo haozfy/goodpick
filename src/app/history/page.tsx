@@ -1,30 +1,16 @@
-// src/app/history/page.tsx
-"use client";
+import { redirect } from "next/navigation";
+import { supabaseServer } from "@/lib/supabase/server";
 
-import { useEffect, useState } from "react";
-import { supabaseBrowser } from "@/lib/supabase/browser";
+export default async function HistoryPage() {
+  const supabase = supabaseServer();
+  const { data } = await supabase.auth.getUser();
 
-export default function HistoryPage() {
-  const [email, setEmail] = useState<string | null>(null);
-
-  useEffect(() => {
-    const supabase = supabaseBrowser();
-    supabase.auth.getUser().then(({ data }) => {
-      setEmail(data.user?.email ?? null);
-    });
-  }, []);
+  if (!data.user) redirect("/login");
 
   return (
-    <main style={{ maxWidth: 720, margin: "60px auto", padding: 16 }}>
-      <h1 style={{ fontSize: 26, fontWeight: 700 }}>History</h1>
-
-      <p style={{ opacity: 0.7, marginTop: 8 }}>
-        {email ? `Logged in as ${email}` : "Not logged in"}
-      </p>
-
-      <div style={{ marginTop: 24, opacity: 0.6 }}>
-        History list coming soon.
-      </div>
+    <main className="mx-auto w-full max-w-3xl px-6 py-16">
+      <h1 className="text-2xl font-semibold">History</h1>
+      <p className="mt-2 text-sm text-neutral-600">Signed in as: {data.user.email}</p>
     </main>
   );
 }
