@@ -1,150 +1,66 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { supabaseServer } from "@/lib/supabase/server";
-import { randomUUID } from "crypto";
+import { createClient } from "@supabase/supabase-js";
 
-export const runtime = "nodejs";
-
-const LIMIT = 3;
-const COOKIE_NAME = "gp_guest";
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
-
-function supabaseAdmin() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } }
-  );
-}
-
-async function enforceQuota(key: string) {
-  const admin = supabaseAdmin();
-  const { data, error } = await admin.rpc("gp_enforce_quota", {
-    p_key: key,
-    p_limit: LIMIT,
-  });
-
-  if (error) {
-    return { ok: false as const, status: 500, error: error.message };
-  }
-
-  const row = Array.isArray(data) ? data[0] : data;
-
-  if (!row?.ok) {
-    return {
-      ok: false as const,
-      status: 429,
-      error: row?.error ?? "limit_reached",
-      used: row?.used ?? LIMIT,
-      limit: row?.quota_limit ?? LIMIT,
-    };
-  }
-
-  return { ok: true as const };
-}
-
-// 你之后把真正的分析逻辑写在这里
-async function analyze(body: any) {
-  return {
-    verdict: "unknown",
-    reasons: ["TODO"],
-    suggestion: "TODO",
-  };
-}
+const FREE_LIMIT = 3;
 
 export async function POST(req: NextRequest) {
   const supabase = await supabaseServer();
-  const { data: auth } = await supabase.auth.getUser();
-  const user = auth.user;
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  // ===== 登录用户 =====
-  if (user) {
-    const admin = supabaseAdmin();
-    const { data: profile } = await admin
-      .from("profiles")
-      .select("is_pro, plan")
-      .eq("id", user.id)
-      .single();
-
-    const paid = profile?.is_pro === true || profile?.plan === "pro";
-
-    if (!paid) {
-      const quota = await enforceQuota(`u_${user.id}`);
-      if (!quota.ok) {
-        return NextResponse.json(
-          {
-            gate: "login_not_paid_limited",
-            error: quota.error,
-            used: quota.used,
-            limit: quota.limit,
-          },
-          { status: quota.status }
-        );
-      }
-    }
-
-    const body = await req.json();
-    const result = await analyze(body);
-
-    return NextResponse.json({
-      ok: true,
-      gate: paid ? "paid_unlimited" : "login_not_paid_limited",
-      result,
-    });
+  // 未登录：直接挡
+  if (!user) {
+    return NextResponse.json({ ok: false, error: "login_required" }, { status: 401 });
   }
 
-  // ===== 未登录 guest =====
-  let guestId = req.cookies.get(COOKIE_NAME)?.value;
-  let needSetCookie = false;
+  const admin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
 
-  if (!guestId) {
-    guestId = randomUUID();
-    needSetCookie = true;
+  // 是否付费
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("is_pro")
+    .eq("id", user.id)
+    .single();
+
+  // 付费用户：无限
+  if (profile?.is_pro) {
+    return NextResponse.json({ ok: true, result: mockResult() });
   }
 
-  const quota = await enforceQuota(`g_${guestId}`);
-  if (!quota.ok) {
-    const res = NextResponse.json(
-      {
-        gate: "guest_limited",
-        error: quota.error,
-        used: quota.used,
-        limit: quota.limit,
-      },
-      { status: quota.status }
+  // 免费用户：3 次
+  const { data: row } = await admin
+    .from("usage")
+    .upsert({ user_id: user.id }, { onConflict: "user_id" })
+    .select("used")
+    .single();
+
+  const used = row?.used ?? 0;
+  if (used >= FREE_LIMIT) {
+    return NextResponse.json(
+      { ok: false, error: "limit_reached", limit: FREE_LIMIT },
+      { status: 402 }
     );
-
-    if (needSetCookie) {
-      res.cookies.set(COOKIE_NAME, guestId, {
-        httpOnly: true,
-        sameSite: "lax",
-        secure: true,
-        path: "/",
-        maxAge: COOKIE_MAX_AGE,
-      });
-    }
-
-    return res;
   }
 
-  const body = await req.json();
-  const result = await analyze(body);
+  await admin
+    .from("usage")
+    .update({ used: used + 1 })
+    .eq("user_id", user.id);
 
-  const res = NextResponse.json({
-    ok: true,
-    gate: "guest_limited",
-    result,
-  });
+  return NextResponse.json({ ok: true, result: mockResult() });
+}
 
-  if (needSetCookie) {
-    res.cookies.set(COOKIE_NAME, guestId, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: true,
-      path: "/",
-      maxAge: COOKIE_MAX_AGE,
-    });
-  }
-
-  return res;
+// 先占位
+function mockResult() {
+  return {
+    score: 62,
+    label: "Good",
+    negatives: [],
+    positives: [],
+  };
 }

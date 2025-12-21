@@ -1,30 +1,33 @@
-import Stripe from "stripe";
-import { NextResponse } from "next/server";
-import { mustEnv } from "@/lib/env";
+// src/app/api/stripe/checkout/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import { stripe } from "@/lib/stripe";
+import { supabaseServer } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-const stripe = new Stripe(mustEnv("STRIPE_SECRET_KEY"), {
-  apiVersion: "2025-02-24.acacia" as any,
-});
+export async function POST(req: NextRequest) {
+  const supabase = await supabaseServer();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-export async function POST(req: Request) {
-  try {
-    const { plan } = (await req.json()) as { plan: "monthly" | "yearly" };
-    const priceId =
-      plan === "yearly" ? mustEnv("PRICE_ID_YEARLY_PRO") : mustEnv("PRICE_ID_MONTHLY_PRO");
-
-    const origin = req.headers.get("origin") ?? "http://localhost:3000";
-
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${origin}/result?paid=1`,
-      cancel_url: `${origin}/result?paid=0`,
-    });
-
-    return NextResponse.json({ url: session.url });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "unknown" }, { status: 400 });
+  if (!user) {
+    return NextResponse.json({ ok: false, error: "login_required" }, { status: 401 });
   }
+
+  const origin = req.headers.get("origin") ?? process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+
+  const session = await stripe.checkout.sessions.create({
+    mode: "subscription",
+    payment_method_types: ["card"],
+    client_reference_id: user.id,
+    customer_email: user.email ?? undefined,
+    line_items: [{ price: process.env.STRIPE_PRICE_ID!, quantity: 1 }],
+    allow_promotion_codes: true,
+    success_url: `${origin}/billing/success`,
+    cancel_url: `${origin}/billing/cancel`,
+    metadata: { user_id: user.id },
+  });
+
+  return NextResponse.json({ ok: true, url: session.url });
 }
