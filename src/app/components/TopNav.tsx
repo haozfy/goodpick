@@ -1,26 +1,48 @@
 // src/app/components/TopNav.tsx
+"use client";
+
 import Link from "next/link";
-import UserMenu from "@/app/components/UserMenu";
+import { useEffect, useState } from "react";
+import { supabaseBrowser } from "@/lib/supabase/client";
 
 export default function TopNav() {
+  const supabase = supabaseBrowser();
+  const [user, setUser] = useState<any>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user);
+    });
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => {
+      sub.subscription.unsubscribe();
+    };
+  }, []);
+
+  const logout = async () => {
+    await supabase.auth.signOut();
+    window.location.href = "/";
+  };
+
   return (
-    <header className="sticky top-0 z-20 border-b border-neutral-200 bg-white/80 backdrop-blur">
-      <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
-        <div className="flex items-center gap-3">
-          <Link href="/" className="font-semibold">
-            Goodpick
-          </Link>
-          <span className="text-sm text-neutral-500">Scan food. Get a better pick.</span>
-        </div>
+    <header className="border-b bg-white">
+      <div className="mx-auto flex max-w-4xl items-center justify-between p-4">
+        <Link href="/" className="font-semibold">
+          Goodpick
+        </Link>
 
         <nav className="flex items-center gap-4 text-sm">
-          <Link href="/" className="text-neutral-700 hover:text-black">
-            Scan
-          </Link>
-          <Link href="/history" className="text-neutral-700 hover:text-black">
-            History
-          </Link>
-          <UserMenu />
+          <Link href="/">Scan</Link>
+          {user && <Link href="/account">Account</Link>}
+          {!user ? (
+            <Link href="/login">Login</Link>
+          ) : (
+            <button onClick={logout}>Logout</button>
+          )}
         </nav>
       </div>
     </header>
