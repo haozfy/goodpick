@@ -1,36 +1,51 @@
-// src/app/auth/callback/page.tsx
 "use client";
 
-import { useEffect } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
 export default function AuthCallbackPage() {
-  const params = useSearchParams();
   const router = useRouter();
+  const [msg, setMsg] = useState("Signing you in…");
 
   useEffect(() => {
     const run = async () => {
-      const code = params.get("code");
-      const next = params.get("next") || "/";
+      const supabase = supabaseBrowser();
 
-      if (!code) {
-        router.replace("/login");
+      // ✅ 不用 useSearchParams，避免 Next prerender 报错
+      const params = new URLSearchParams(window.location.search);
+      const next = params.get("next") || "/history";
+      const code = params.get("code");
+      const error = params.get("error");
+      const errorDesc = params.get("error_description");
+
+      if (error) {
+        setMsg(`Login failed: ${errorDesc || error}`);
         return;
       }
 
-      const supabase = supabaseBrowser();
-      await supabase.auth.exchangeCodeForSession(code);
+      if (!code) {
+        setMsg("Missing code in callback URL.");
+        return;
+      }
 
+      const { error: exErr } = await supabase.auth.exchangeCodeForSession(code);
+      if (exErr) {
+        setMsg(`Login failed: ${exErr.message}`);
+        return;
+      }
+
+      setMsg("Logged in. Redirecting…");
       router.replace(next);
     };
 
     run();
-  }, [params, router]);
+  }, [router]);
 
   return (
-    <div className="p-6 text-sm text-neutral-500">
-      Signing you in…
-    </div>
+    <main className="mx-auto w-full max-w-md px-6 py-16">
+      <h1 className="text-2xl font-semibold">Goodpick</h1>
+      <p className="mt-3 text-sm text-neutral-600">{msg}</p>
+    </main>
   );
 }
