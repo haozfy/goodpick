@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { stripe } from "@/lib/stripe"; // ✅ 使用统一的 Stripe 实例
-import { createClient } from "@/lib/supabase/server"; // ✅ 使用标准的 Supabase Server 客户端
+import { stripe } from "@/lib/stripe"; 
+import { createClient } from "@/lib/supabase/server"; 
 
 export async function POST(req: Request) {
   try {
-    // 1. 获取当前登录用户
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
@@ -12,26 +11,29 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // 2. 准备参数
     const userId = user.id;
     const userEmail = user.email;
-    const siteUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"; // 你的前端地址
-    const priceId = process.env.STRIPE_PRICE_ID; // 你的 $9.99 价格 ID
+    
+    // ⚠️ 核心修改：使用你 Vercel 里实际配置的变量名
+    const priceId = process.env.PRICE_ID_MONTHLY_PRO; 
 
+    // 增加一个检查日志，方便你调试
     if (!priceId) {
-      return NextResponse.json({ error: "Price ID not configured" }, { status: 500 });
+      console.error("Error: Missing PRICE_ID_MONTHLY_PRO in environment variables.");
+      return NextResponse.json({ error: "Server Error: Price ID not configured" }, { status: 500 });
     }
 
-    // 3. 创建 Stripe Session
+    const siteUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       payment_method_types: ["card"],
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${siteUrl}/account?success=true`,
       cancel_url: `${siteUrl}/account?canceled=true`,
-      customer_email: userEmail, // 自动填入用户邮箱
+      customer_email: userEmail,
       metadata: { 
-        userId: userId // 关键：把 Supabase 的 userId 传给 Stripe
+        userId: userId 
       }, 
     });
 
