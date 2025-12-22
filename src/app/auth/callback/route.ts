@@ -3,23 +3,21 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET(request: Request) {
-  // 1. 解析 URL
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  
-  // ✅ 关键修改：查看有没有 "next" 参数，如果有就去 next，没有才回首页 "/"
-  // 之前的代码可能直接写了 const next = "/";
-  const next = searchParams.get("next") ?? "/";
 
   if (code) {
     const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
+    
     if (!error) {
-      // ✅ 登录成功，带你去你想去的地方
-      return NextResponse.redirect(`${origin}${next}`);
+      // 🚀 强制跳转逻辑：
+      // 不管前端传没传 next，也不管是 Google 还是邮箱，
+      // 只要验证成功，统一跳到 /account
+      return NextResponse.redirect(`${origin}/account`);
     }
   }
 
-  // 登录失败，回首页或错误页
+  // 验证失败，跳回登录页
   return NextResponse.redirect(`${origin}/login?error=auth_code_error`);
 }
