@@ -1,23 +1,43 @@
 // src/app/auth/callback/route.ts
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
 
 export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url);
-  const code = searchParams.get("code");
+  const url = new URL(request.url);
+  const code = url.searchParams.get("code");
+  const origin = url.origin;
 
-  if (code) {
-    const supabase = await createClient();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    
-    if (!error) {
-      // 🚀 强制跳转逻辑：
-      // 不管前端传没传 next，也不管是 Google 还是邮箱，
-      // 只要验证成功，统一跳到 /account
-      return NextResponse.redirect(`${origin}/account`);
-    }
+  if (!code) {
+    return NextResponse.redirect(`${origin}/login?error=missing_code`);
   }
 
-  // 验证失败，跳回登录页
+  // ✅ 修正点：Next.js 15/16 要求必须 await cookies()
+  const cookieStore = await cookies();
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            cookieStore.set(name, value, options);
+          });
+        },
+      },
+    }
+  );
+
+  const { error } = await supabase.auth.exchangeCodeForSession(code);
+
+  if (!error) {
+    // ✅ 强制跳转到 Account 页面，解决 Google 登录跳首页的问题
+    return NextResponse.redirect(`${origin}/account`);
+  }
+
   return NextResponse.redirect(`${origin}/login?error=auth_code_error`);
 }
