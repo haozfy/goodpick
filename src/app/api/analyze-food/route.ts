@@ -1,72 +1,89 @@
-// src/app/api/analyze-food/route.ts
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
-
-// ❌ 删除这里的顶层初始化
-// const openai = new OpenAI({ ... });
+import { createClient } from "@/lib/supabase/server";
 
 export async function POST(req: Request) {
   try {
-    // ✅ 改为：在函数内部初始化
-    // 这样在 Build 构建阶段不会因为缺少 Key 而报错
-    const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
+    const { imageBase64 } = await req.json();
+    if (!imageBase64) return NextResponse.json({ error: "No image provided" }, { status: 400 });
 
-    const { image } = await req.json();
+    // 1. 验证用户登录
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    if (!image) {
-      return NextResponse.json({ error: "No image provided" }, { status: 400 });
-    }
-
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: `You are a nutritional expert AI. Your job is to identify food from an image and judge its healthiness.
-          Return ONLY a strict JSON object with no other text. The structure must be:
+    // 2. 调用 OpenAI GPT-4o 分析图片
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        messages: [
           {
-            "name": "Short name of the food",
-            "score": An integer between 0 (unhealthy) and 100 (very healthy),
-            "reason": "A very short, one-sentence reason for the score."
-          }`
-        },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: "Analyze this food image." },
+            role: "system",
+            content: `You are a strict nutritionist AI. Analyze the food product image. 
+            Return ONLY a valid JSON object (no markdown, no backticks) with this structure:
             {
-              type: "image_url",
-              image_url: {
-                url: image,
-                detail: "low"
-              },
-            },
-          ],
-        },
-      ],
-      max_tokens: 300,
+              "product_name": "Name of product",
+              "score": 0-100 integer (100 is healthiest),
+              "grade": "green" (healthy) or "black" (unhealthy),
+              "analysis": "Short punchy reason why. Max 15 words.",
+              "alternatives": [
+                {"name": "Alt 1", "reason": "Why better", "price": "$"},
+                {"name": "Alt 2", "reason": "Why better", "price": "$$"}
+              ] (Only provide alternatives if grade is black, otherwise empty array)
+            }`
+          },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Analyze this food label/product." },
+              { type: "image_url", image_url: { url: imageBase64 } },
+            ],
+          },
+        ],
+        max_tokens: 500,
+      }),
     });
 
-    const content = response.choices[0]?.message?.content;
+    const data = await response.json();
     
-    if (!content) {
-       throw new Error("No analysis result from AI");
+    // 解析 AI 返回的 JSON 字符串
+    let aiResult;
+    try {
+      const content = data.choices[0].message.content;
+      // 清理可能存在的 markdown 符号
+      const cleanJson = content.replace(/```json/g, "").replace(/```/g, "").trim();
+      aiResult = JSON.parse(cleanJson);
+    } catch (e) {
+      console.error("AI Parse Error:", data);
+      return NextResponse.json({ error: "AI failed to analyze" }, { status: 500 });
     }
 
-    const cleanedContent = content.replace(/```json|```/g, '').trim();
-    const analysisResult = JSON.parse(cleanedContent);
+    // 3. 将结果存入 Supabase 数据库
+    const { data: scanData, error: dbError } = await supabase
+      .from("scans")
+      .insert({
+        user_id: user.id,
+        image_url: "base64-image", // 暂时不存大图，省流量，或者后续存 Storage
+        product_name: aiResult.product_name,
+        score: aiResult.score,
+        grade: aiResult.grade,
+        analysis: aiResult.analysis,
+        alternatives: aiResult.alternatives
+      })
+      .select()
+      .single();
 
-    console.log("AI Analysis Success:", analysisResult.name);
+    if (dbError) throw dbError;
 
-    return NextResponse.json({ ok: true, data: analysisResult });
+    // 4. 返回新建的 Scan ID 给前端
+    return NextResponse.json({ id: scanData.id });
 
   } catch (error: any) {
-    console.error("AI Analysis Error:", error);
-    return NextResponse.json(
-      { error: error.message || "Failed to analyze image" },
-      { status: 500 }
-    );
+    console.error(error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
