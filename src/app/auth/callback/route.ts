@@ -1,18 +1,20 @@
 // src/app/auth/callback/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server"; // ✅ 1. 改这里
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 
-export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  const code = url.searchParams.get("code");
+export async function GET(request: Request) {
+  const { searchParams, origin } = new URL(request.url);
+  const code = searchParams.get("code");
+  const next = searchParams.get("next") ?? "/";
 
-  if (!code) {
-    return NextResponse.redirect(new URL("/login", url.origin));
+  if (code) {
+    const supabase = await createClient();
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (!error) {
+      return NextResponse.redirect(`${origin}${next}`);
+    }
   }
 
-  // ✅ 2. 改这里：调用 createClient
-  const supabase = await createClient();
-  await supabase.auth.exchangeCodeForSession(code);
-
-  return NextResponse.redirect(new URL("/", url.origin));
+  // 如果出错，跳回登录页
+  return NextResponse.redirect(`${origin}/login?error=auth_code_error`);
 }

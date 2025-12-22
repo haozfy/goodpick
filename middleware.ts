@@ -1,24 +1,21 @@
 // src/middleware.ts
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import { type NextRequest } from "next/server";
+import { updateSession } from "@/lib/supabase/middleware";
 
-export function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl;
-
-  // never loop on these
-  if (
-    pathname.startsWith("/login") ||
-    pathname.startsWith("/auth/callback") ||
-    pathname.startsWith("/api") ||
-    pathname.startsWith("/_next") ||
-    pathname === "/favicon.ico"
-  ) {
-    return NextResponse.next();
-  }
-
-  return NextResponse.next();
+export async function middleware(request: NextRequest) {
+  // updateSession 是 Supabase 官方提供的 helper，用来刷新 cookie
+  return await updateSession(request);
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: [
+    /*
+     * 匹配所有路径，除了:
+     * - _next/static (静态文件)
+     * - _next/image (图片优化)
+     * - favicon.ico (图标)
+     * - images - public 里的图片
+     */
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 };

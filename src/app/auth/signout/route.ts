@@ -1,15 +1,19 @@
 // src/app/auth/signout/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server"; // ✅ 1. 改这里
+import { createClient } from "@/lib/supabase/server";
+import { NextResponse } from "next/server";
 
-export const runtime = "nodejs";
-
-export async function POST(req: NextRequest) {
-  const url = new URL(req.url);
-  
-  // ✅ 2. 改这里
+export async function POST(req: Request) {
   const supabase = await createClient();
   
-  await supabase.auth.signOut();
-  return NextResponse.redirect(new URL("/", url.origin));
+  // 检查是否登录
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if (session) {
+    await supabase.auth.signOut();
+  }
+
+  // 重定向回登录页
+  return NextResponse.redirect(new URL("/login", req.url), {
+    status: 302,
+  });
 }
