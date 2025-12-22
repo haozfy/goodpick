@@ -111,8 +111,8 @@ export default function AccountPage() {
             </h3>
             <p className="mt-1 text-sm opacity-90 max-w-[220px] leading-relaxed">
               {user.isPro 
-                ? "You have full access to unlimited AI scans and history." 
-                : "Upgrade to unlock unlimited AI scans and detailed health reports."}
+                ? "You have full access to unlimited scans and history." 
+                : "Upgrade to unlock unlimited scans and detailed health reports."}
             </p>
             
             {/* 只有非会员才显示升级按钮 */}
