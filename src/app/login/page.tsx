@@ -36,7 +36,9 @@ export default function LoginPage() {
           password,
         });
         if (error) throw error;
-        router.push("/"); 
+        
+        // 🔴 修改点 1：邮箱登录成功后，跳转到 /account
+        router.push("/account"); 
         router.refresh();
       }
     } catch (error: any) {
@@ -48,16 +50,17 @@ export default function LoginPage() {
 
   // --- 2. Google 登录逻辑 ---
   const handleGoogleLogin = async () => {
-    setLoading(true); // 虽然跳转很快，但给个反馈
+    setLoading(true);
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${location.origin}/auth/callback`, // 登录成功后跳回这里
+          // 🔴 修改点 2：增加 ?next=/account 参数
+          // 这样 auth/callback 路由就知道要跳去哪里，而不是回首页
+          redirectTo: `${location.origin}/auth/callback?next=/account`, 
         },
       });
       if (error) throw error;
-      // 注意：OAuth 会自动跳转去 Google 页面，所以这里不需要 router.push
     } catch (error: any) {
       alert(error.message);
       setLoading(false);
@@ -76,14 +79,13 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* --- Google 登录按钮 (放在最显眼的位置) --- */}
+        {/* --- Google 登录按钮 --- */}
         <button
           type="button"
           onClick={handleGoogleLogin}
           disabled={loading}
           className="mb-6 flex w-full items-center justify-center gap-3 rounded-xl border border-neutral-200 bg-white py-3.5 font-bold text-neutral-700 hover:bg-neutral-50 hover:border-neutral-300 transition-all active:scale-95"
         >
-          {/* Google Logo SVG */}
           <svg className="h-5 w-5" viewBox="0 0 24 24">
             <path
               d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -105,7 +107,6 @@ export default function LoginPage() {
           Continue with Google
         </button>
 
-        {/* 分割线 */}
         <div className="relative mb-6">
           <div className="absolute inset-0 flex items-center">
             <div className="w-full border-t border-neutral-200"></div>
@@ -115,7 +116,6 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* 邮箱密码表单 */}
         <form onSubmit={handleAuth} className="space-y-4">
           <div className="space-y-2">
             <div className="relative">
@@ -159,7 +159,6 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* 切换模式 */}
         <div className="mt-8 text-center">
           <button
             onClick={() => setIsSignUp(!isSignUp)}
