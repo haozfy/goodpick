@@ -1,16 +1,20 @@
-"use client"; // 为了演示交互，先用 client，实际最好用 server component 读参数
+"use client";
 
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, CheckCircle, AlertTriangle } from "lucide-react";
+import { Suspense } from "react"; // ✅ 引入 Suspense
 
-export default function ResultPage() {
+// 1. 创建一个子组件，专门处理原来的页面逻辑
+function ResultContent() {
   const searchParams = useSearchParams();
-  // 实际开发中，这里应该根据 id 去 Supabase fetch 数据
-  // 现在我们先 Mock 一下数据来展示 UI 效果
-  const isBlackCard = true; // 假设这是一个黑卡产品
+  // 这里的 ID 后续会用来去 Supabase 查数据
+  const id = searchParams.get("id"); 
+
+  // 目前还是 Mock 数据
+  const isBlackCard = true; 
   const score = 35; 
-  
+
   return (
     <div className={`min-h-screen ${isBlackCard ? 'bg-neutral-900' : 'bg-emerald-50'} px-6 py-8`}>
       {/* 顶部导航 */}
@@ -21,7 +25,7 @@ export default function ResultPage() {
         <span className={`text-sm font-bold tracking-widest uppercase ${isBlackCard ? 'text-white/50' : 'text-emerald-900/50'}`}>
           Analysis Result
         </span>
-        <div className="w-9"></div> {/* 占位 */}
+        <div className="w-9"></div>
       </div>
 
       {/* 核心卡片 */}
@@ -63,5 +67,15 @@ export default function ResultPage() {
         )}
       </div>
     </div>
+  );
+}
+
+// 2. 主页面组件只负责用 Suspense 包裹上面的内容
+export default function ResultPage() {
+  return (
+    // fallback 是在加载参数时显示的临时内容
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center">Loading result...</div>}>
+      <ResultContent />
+    </Suspense>
   );
 }
