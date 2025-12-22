@@ -2,21 +2,23 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
-// 初始化 OpenAI 客户端
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// ❌ 删除这里的顶层初始化
+// const openai = new OpenAI({ ... });
 
 export async function POST(req: Request) {
   try {
-    // 1. 接收前端传来的图片数据 (Base64 格式)
+    // ✅ 改为：在函数内部初始化
+    // 这样在 Build 构建阶段不会因为缺少 Key 而报错
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+
     const { image } = await req.json();
 
     if (!image) {
       return NextResponse.json({ error: "No image provided" }, { status: 400 });
     }
 
-    // 2. 调用 GPT-4o-mini
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -37,9 +39,8 @@ export async function POST(req: Request) {
             {
               type: "image_url",
               image_url: {
-                // 告诉 OpenAI 这是一个 Base64 图像
                 url: image,
-                detail: "low" // "low" 更便宜更快，对于简单识别足够了
+                detail: "low"
               },
             },
           ],
@@ -48,21 +49,17 @@ export async function POST(req: Request) {
       max_tokens: 300,
     });
 
-    // 3. 处理 OpenAI 的返回结果
     const content = response.choices[0]?.message?.content;
     
     if (!content) {
        throw new Error("No analysis result from AI");
     }
 
-    // 解析 JSON 结果
-    // 注意：有时候 AI 可能会返回 Markdown 代码块格式 (```json ... ```)，需要去除
     const cleanedContent = content.replace(/```json|```/g, '').trim();
     const analysisResult = JSON.parse(cleanedContent);
 
     console.log("AI Analysis Success:", analysisResult.name);
 
-    // 4. 将结果返回给前端
     return NextResponse.json({ ok: true, data: analysisResult });
 
   } catch (error: any) {
