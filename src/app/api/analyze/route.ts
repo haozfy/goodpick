@@ -1,55 +1,119 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+type Verdict = "good" | "caution" | "avoid";
+
+type AIResult = {
+  product_name: string;
+  score: number; // 0-100
+  verdict: Verdict; // good/caution/avoid
+  risk_tags: string[]; // fixed set
+  analysis: string; // max 15 words
+  alternatives: { name: string; reason: string; price: "$" | "$$" | "$$$" }[];
+};
+
+const FREE_LIMIT = 3;
+
+// 只允许这些 tag，避免模型乱输出污染 Insights
+const ALLOWED_TAGS = new Set([
+  "added_sugar",
+  "high_sodium",
+  "refined_oils",
+  "refined_carbs",
+  "many_additives",
+  "ultra_processed",
+  "low_fiber",
+  "low_protein",
+]);
+
+function clampInt(n: any, min: number, max: number) {
+  const x = Number.isFinite(Number(n)) ? Math.trunc(Number(n)) : min;
+  return Math.min(max, Math.max(min, x));
+}
+
+function verdictFromScore(score: number): Verdict {
+  if (score >= 80) return "good";
+  if (score >= 50) return "caution";
+  return "avoid";
+}
+
+function safeJsonParse(content: string) {
+  const cleaned = content.replace(/```json/g, "").replace(/```/g, "").trim();
+  return JSON.parse(cleaned);
+}
+
+function normalizeAI(raw: any): AIResult {
+  const product_name = String(raw?.product_name ?? "").trim() || "Unknown product";
+  const score = clampInt(raw?.score, 0, 100);
+
+  const vRaw = String(raw?.verdict ?? "").toLowerCase();
+  const verdict: Verdict =
+    vRaw === "good" || vRaw === "caution" || vRaw === "avoid"
+      ? vRaw
+      : verdictFromScore(score);
+
+  const analysis = String(raw?.analysis ?? "").trim().slice(0, 120);
+
+  const risk_tags = Array.isArray(raw?.risk_tags)
+    ? raw.risk_tags
+        .map((t: any) => String(t).trim().toLowerCase())
+        .filter((t: string) => ALLOWED_TAGS.has(t))
+        .slice(0, 6)
+    : [];
+
+  let alternatives: AIResult["alternatives"] = [];
+  if (verdict !== "good" && Array.isArray(raw?.alternatives)) {
+    alternatives = raw.alternatives
+      .slice(0, 3)
+      .map((a: any) => ({
+        name: String(a?.name ?? "").trim().slice(0, 80),
+        reason: String(a?.reason ?? "").trim().slice(0, 80),
+        price: (["$", "$$", "$$$"].includes(a?.price) ? a.price : "$$") as "$" | "$$" | "$$$",
+      }))
+      .filter((a: any) => a.name);
+  }
+
+  return { product_name, score, verdict, risk_tags, analysis, alternatives };
+}
+
 export async function POST(req: Request) {
   try {
     const { imageBase64 } = await req.json();
-    if (!imageBase64) return NextResponse.json({ error: "No image provided" }, { status: 400 });
+    if (!imageBase64) {
+      return NextResponse.json({ error: "No image provided" }, { status: 400 });
+    }
 
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    // ============================================================
-    // 🚦 核心限流逻辑开始
-    // ============================================================
-    
-    // 1. 获取用户的会员状态
+    // 1) 配额：读取 profiles.is_pro
     const { data: profile } = await supabase
       .from("profiles")
       .select("is_pro")
       .eq("id", user.id)
       .single();
 
-    const isPro = profile?.is_pro || false;
-    const FREE_LIMIT = 3; // 设定免费次数为 3 次
+    const isPro = !!profile?.is_pro;
 
-    // 2. 如果不是会员，检查已使用次数
+    // 2) 免费用户限流：count scans
     if (!isPro) {
-      // count: 'exact' 会只返回数量，不返回具体数据，速度极快
       const { count, error: countError } = await supabase
         .from("scans")
         .select("*", { count: "exact", head: true })
         .eq("user_id", user.id);
 
       if (countError) throw new Error("Failed to check quota");
-
-      // 3. 如果超过限制，直接返回 403 禁止访问
       if (count !== null && count >= FREE_LIMIT) {
-        return NextResponse.json(
-          { error: "Free limit reached", code: "LIMIT_REACHED" }, 
-          { status: 403 }
-        );
+        return NextResponse.json({ error: "Free limit reached", code: "LIMIT_REACHED" }, { status: 403 });
       }
     }
-    // ============================================================
-    // 🚦 核心限流逻辑结束 (后面继续调用 OpenAI)
-    // ============================================================
 
-    // ... (后续的 OpenAI 调用代码保持不变)
+    // 3) 调 OpenAI
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      // ... 保持原有代码 ...
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -58,22 +122,45 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         model: "gpt-4o",
         messages: [
-           // ... 保持原有 Prompt ...
-           {
+          {
             role: "system",
-            content: `You are a strict nutritionist AI. Analyze the food product image. 
-            Return ONLY a valid JSON object (no markdown, no backticks) with this structure:
-            {
-              "product_name": "Name of product",
-              "score": 0-100 integer (100 is healthiest),
-              "grade": "green" (healthy) or "black" (unhealthy),
-              "analysis": "Short punchy reason why. Max 15 words.",
-              "alternatives": [
-                {"name": "Alt 1", "reason": "Why better", "price": "$"},
-                {"name": "Alt 2", "reason": "Why better", "price": "$$"}
-              ] 
-            }
-            If grade is green, alternatives should be an empty array.`
+            content: `You are a strict, consistent nutrition scoring engine.
+
+Return ONLY valid JSON (no markdown). Use this exact structure:
+{
+  "product_name": string,
+  "score": integer 0-100,
+  "verdict": "good" | "caution" | "avoid",
+  "risk_tags": string[],
+  "analysis": string,
+  "alternatives": [
+    {"name": string, "reason": string, "price": "$" | "$$" | "$$$"}
+  ]
+}
+
+Scoring rule:
+Start from 100 and only subtract points based on health risks:
+- added sugar: 0-35
+- ultra processed: 0-25
+- refined carbs: 0-20
+- poor oils: 0-15
+- high sodium: 0-10
+- many additives: 0-15
+Clamp to 0-100.
+
+Verdict mapping:
+- score >= 80 => "good"
+- 50-79 => "caution"
+- <= 49 => "avoid"
+
+risk_tags must be from this fixed set only:
+["added_sugar","high_sodium","refined_oils","refined_carbs","many_additives","ultra_processed","low_fiber","low_protein"]
+
+analysis must be punchy, user-friendly, max 15 words.
+
+alternatives rule:
+- If verdict is "good", alternatives must be []
+- Otherwise provide 2-3 realistic cleaner alternatives (same category).`,
           },
           {
             role: "user",
@@ -84,42 +171,47 @@ export async function POST(req: Request) {
           },
         ],
         max_tokens: 500,
+        temperature: 0.2,
       }),
     });
 
-    // ... (后面的解析 JSON 和 存入数据库代码保持不变) ...
-    // 为防万一，把你之前的解析和存库代码贴在下面：
-    
     const data = await response.json();
-    let aiResult;
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) return NextResponse.json({ error: "Invalid AI response" }, { status: 500 });
+
+    let aiResult: AIResult;
     try {
-        if (!data.choices || !data.choices[0]?.message?.content) throw new Error("Invalid AI response");
-        let content = data.choices[0].message.content;
-        content = content.replace(/```json/g, "").replace(/```/g, "").trim();
-        aiResult = JSON.parse(content);
-    } catch (e) {
-        return NextResponse.json({ error: "AI failed to analyze" }, { status: 500 });
+      aiResult = normalizeAI(safeJsonParse(content));
+    } catch {
+      return NextResponse.json({ error: "AI failed to analyze" }, { status: 500 });
     }
 
+    // 4) 写入 scans（你原来的 grade 仍可保留，但我建议最终只用 verdict）
     const { data: scanData, error: dbError } = await supabase
       .from("scans")
       .insert({
         user_id: user.id,
-        image_url: "", 
+        image_url: "",
         product_name: aiResult.product_name,
         score: aiResult.score,
-        grade: aiResult.grade?.toLowerCase() || "black",
+        verdict: aiResult.verdict,
+        grade: aiResult.verdict === "good" ? "green" : "black", // 兼容旧字段（可选）
         analysis: aiResult.analysis,
-        alternatives: aiResult.alternatives
+        risk_tags: aiResult.risk_tags,
+        alternatives: aiResult.alternatives,
       })
-      .select()
+      .select("id, created_at, product_name, score, verdict, analysis, risk_tags, alternatives")
       .single();
 
     if (dbError) throw new Error(dbError.message);
-    return NextResponse.json({ id: scanData.id });
 
+    // 5) 返回给前端：不仅 id，还返回结果（前端不用再查一次）
+    return NextResponse.json({
+      id: scanData.id,
+      scan: scanData,
+    });
   } catch (error: any) {
-    console.error("API Route Error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Analyze API Error:", error);
+    return NextResponse.json({ error: error.message ?? "Server error" }, { status: 500 });
   }
 }
