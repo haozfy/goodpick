@@ -1,24 +1,19 @@
-// src/app/page.tsx
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Scan, Search, ChevronRight, Camera, Loader2 } from "lucide-react";
+import { Scan, Search, Camera, Loader2, ChevronRight } from "lucide-react";
 import { useState, useRef } from "react";
+import Link from "next/link"; // 确保引入 Link
 
 export default function HomePage() {
   const router = useRouter();
-  // 定义状态：闲置 | 处理图片中 | AI分析中
   const [status, setStatus] = useState<"idle" | "processing" | "analyzing">("idle");
-  // 隐藏的文件输入框引用
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 1. 点击大按钮 -> 触发隐藏的文件输入框点击
   const handleBigButtonClick = () => {
     fileInputRef.current?.click();
   };
 
-  // 2. 处理文件选择
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -26,38 +21,40 @@ export default function HomePage() {
     setStatus("processing");
 
     try {
-      // 将图片转换为 Base64 字符串
-      const base64Image = await toBase64(file);
+      // 1. 压缩图片 (解决 payload too large 问题)
+      const compressedBase64 = await compressImage(file);
       
       setStatus("analyzing");
 
-      // 发送给我们的后端 API
+      // 2. 发送给后端
       const response = await fetch("/api/analyze-food", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: base64Image }),
+        body: JSON.stringify({ image: compressedBase64 }),
       });
 
       const result = await response.json();
 
-      if (!response.ok) throw new Error(result.error);
+      if (!response.ok) {
+        throw new Error(result.error || "Server error");
+      }
 
-      // --- AI 分析成功！ ---
+      // --- AI Analysis Success ---
       const aiData = result.data;
-      // 为了简单演示，我们先把结果打印出来，并用弹窗显示
-      // 下一步我们会把这个数据传到一个漂亮的详情页里
       console.log("AI Result:", aiData);
-      alert(`AI 分析结果:\n\n食物: ${aiData.name}\n得分: ${aiData.score}\n原因: ${aiData.reason}`);
       
-      // TODO: 将来我们会在这里跳转到详情页，例如：
-      // router.push(`/product/ai-result?data=${encodeURIComponent(JSON.stringify(aiData))}`);
+      // 使用英文弹窗
+      alert(`AI Analysis Result:\n\nFood: ${aiData.name}\nScore: ${aiData.score}\nReason: ${aiData.reason}`);
 
-    } catch (error) {
-      console.error("Error:", error);
-      alert("分析失败，请重试。");
+      // TODO: 将来这里可以跳转
+      // router.push(...)
+
+    } catch (error: any) {
+      console.error("Error details:", error);
+      // 英文错误提示
+      alert(`Analysis failed: ${error.message || "Please try again."}`);
     } finally {
       setStatus("idle");
-      // 清空输入框，允许重复选择同一张图
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
@@ -66,13 +63,12 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-neutral-50 pb-28">
-      {/* 隐藏的文件输入框：accept="image/*" 允许图片，capture="environment" 优先调用后置摄像头 */}
       <input 
         type="file" 
         ref={fileInputRef} 
         onChange={handleFileChange} 
         accept="image/*" 
-        // capture="environment" // 在手机上取消注释这行可以优先调用摄像头而不是相册
+        // capture="environment" // 手机上取消注释这行
         className="hidden" 
       />
 
@@ -83,7 +79,6 @@ export default function HomePage() {
         </h1>
       </header>
 
-      {/* ... 搜索栏保持不变 ... */}
       <div className="px-6 mb-8">
         <div className="flex items-center gap-3 bg-white p-4 rounded-2xl shadow-sm ring-1 ring-neutral-100">
           <Search size={20} className="text-neutral-400" />
@@ -91,15 +86,13 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* --- 核心功能：拍照分析卡片 --- */}
+      {/* Hero Card */}
       <div className="px-6 mb-10">
         <div 
-            onClick={isLoading ? undefined : handleBigButtonClick} // 加载时禁用点击
+            onClick={isLoading ? undefined : handleBigButtonClick} 
             className={`relative overflow-hidden rounded-[32px] bg-neutral-900 p-8 text-white shadow-xl shadow-neutral-200 transition-transform ${isLoading ? "opacity-90 cursor-not-allowed" : "cursor-pointer active:scale-95"}`}
         >
           <div className="relative z-10 flex flex-col items-center text-center">
-            
-            {/* 动态图标：加载时旋转 */}
             <div className={`mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-900/20 ring-4 ring-emerald-500/20 ${isLoading ? "animate-pulse" : ""}`}>
               {isLoading ? (
                 <Loader2 size={32} className="animate-spin" />
@@ -109,7 +102,7 @@ export default function HomePage() {
             </div>
             
             <h2 className="text-2xl font-bold tracking-tight">
-              {status === "processing" && "Processing Image..."}
+              {status === "processing" && "Compressing..."}
               {status === "analyzing" && "AI Analyzing..."}
               {status === "idle" && "Snap & Judge Food"}
             </h2>
@@ -120,34 +113,87 @@ export default function HomePage() {
             </p>
             
             <button className="mt-8 w-full rounded-2xl bg-white py-4 text-sm font-bold text-neutral-900">
-              {isLoading ? "Analyzing..." : "Take a Photo"}
+              {isLoading ? "Processing..." : "Take a Photo"}
             </button>
           </div>
-          
-          {/* 装饰光晕 */}
           <div className="absolute -top-20 -right-20 h-64 w-64 rounded-full bg-neutral-800 opacity-50 blur-3xl" />
           <div className="absolute -bottom-20 -left-20 h-64 w-64 rounded-full bg-emerald-900 opacity-40 blur-3xl" />
         </div>
       </div>
 
-      {/* ... 历史记录保持不变 ... */}
       <div className="px-6">
-         {/* ... (省略历史记录代码，与之前相同) ... */}
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold text-neutral-900">Recent Scans</h3>
+          <span className="text-sm font-medium text-emerald-600">See all</span>
+        </div>
+        <div className="space-y-3">
+             <HistoryItem href="/product/123" name="Oat Milk Original" brand="Oatly" score={92} time="2m ago" />
+             <HistoryItem href="/product/456" name="Tomato Ketchup" brand="Heinz" score={45} time="1h ago" />
+        </div>
       </div>
     </div>
   );
 }
 
-// 工具函数：将文件转换为 Base64 字符串
-const toBase64 = (file: File) => new Promise<string | ArrayBuffer | null>((resolve, reject) => {
+// --- 核心修复：图片压缩函数 ---
+const compressImage = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = error => reject(error);
-});
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        // 限制最大宽度为 800px，高度按比例缩放
+        const MAX_WIDTH = 800;
+        const scale = MAX_WIDTH / img.width;
+        
+        // 如果图片本来就很小，就不缩放
+        if (scale >= 1) {
+            resolve(event.target?.result as string);
+            return;
+        }
 
-// HistoryItem 组件也保持不变...
+        canvas.width = MAX_WIDTH;
+        canvas.height = img.height * scale;
+
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        // 转换为 JPEG，质量 0.7
+        const compressedDataUrl = canvas.toDataURL("image/jpeg", 0.7);
+        resolve(compressedDataUrl);
+      };
+      img.onerror = (err) => reject(err);
+    };
+    reader.onerror = (err) => reject(err);
+  });
+};
+
 function HistoryItem({ href, name, brand, score, time }: any) {
-  // ... (省略代码，与之前相同)
-  return <div></div> // 占位
+    let colorClass = "bg-emerald-500";
+    if (score < 40) colorClass = "bg-rose-500";
+    else if (score < 70) colorClass = "bg-amber-400";
+  
+    return (
+      <Link href={href} className="flex items-center justify-between rounded-2xl bg-white p-3 shadow-sm ring-1 ring-neutral-100 transition-all hover:bg-neutral-50 active:scale-[0.99]">
+        <div className="flex items-center gap-4">
+          <div className="relative h-14 w-14 flex-shrink-0 rounded-xl bg-neutral-100 flex items-center justify-center text-xs text-neutral-400">
+              Img
+              <div className={`absolute -bottom-1 -right-1 h-5 w-5 rounded-full border-2 border-white ${colorClass} flex items-center justify-center text-[8px] font-bold text-white`}>
+                  {score}
+              </div>
+          </div>
+          <div>
+            <h4 className="font-semibold text-neutral-900 leading-tight">{name}</h4>
+            <p className="text-xs text-neutral-500 mt-0.5">{brand}</p>
+          </div>
+        </div>
+        <div className="flex items-center text-neutral-400 gap-1">
+          <span className="text-xs">{time}</span>
+          <ChevronRight size={16} />
+        </div>
+      </Link>
+    );
 }
