@@ -1,64 +1,65 @@
-"use client";
+import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 
-import { Scan, Search } from "lucide-react";
+export default async function DashboardPage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
 
-export default function Dashboard() {
+  if (!user) {
+    redirect("/login");
+  }
+
+  // 获取所有记录
+  const { data: scans } = await supabase
+    .from("scans")
+    .select("*")
+    .order("created_at", { ascending: false });
+
   return (
-    <div className="min-h-screen bg-neutral-50 px-6 py-10">
-      <h1 className="text-2xl font-bold text-neutral-900 mb-6">Health Overview</h1>
+    <div className="min-h-screen bg-neutral-50 px-6 pb-24 pt-8">
+      <div className="mb-8 flex items-center gap-4">
+        <Link href="/" className="rounded-full bg-white p-2 text-neutral-900 shadow-sm border border-neutral-200">
+          <ArrowLeft size={20} />
+        </Link>
+        <h1 className="text-2xl font-bold text-neutral-900">Scan History</h1>
+      </div>
 
-      {/* --- 核心图表：环形图 --- */}
-      <div className="relative mb-8 flex flex-col items-center justify-center rounded-[32px] bg-white p-8 shadow-sm ring-1 ring-neutral-100">
-        {/* CSS 简单的环形图模拟 */}
-        <div 
-            className="relative h-48 w-48 rounded-full"
-            style={{
-                background: `conic-gradient(
-                    #2ECC71 0% 60%, 
-                    #F1C40F 60% 85%, 
-                    #E74C3C 85% 100%
-                )`
-            }}
-        >
-            {/* 中间挖空 */}
-            <div className="absolute inset-4 rounded-full bg-white flex flex-col items-center justify-center">
-                <span className="text-sm text-neutral-400 uppercase tracking-wide">Score</span>
-                <span className="text-5xl font-bold text-neutral-900">85</span>
-                <span className="text-emerald-500 font-medium bg-emerald-50 px-2 py-0.5 rounded-full text-xs mt-1">Excellent</span>
+      <div className="grid gap-3">
+        {scans?.map((scan) => (
+          <Link href={`/scan-result?id=${scan.id}`} key={scan.id} className="block">
+            <div className="flex items-center justify-between rounded-2xl bg-white p-4 shadow-sm border border-neutral-100 transition-colors hover:border-emerald-200">
+              <div className="flex items-center gap-4">
+                {/* 缩略图 Placeholder */}
+                <div className="h-12 w-12 rounded-xl bg-neutral-100 object-cover">
+                  {/* 如果有 image_url 可以放 img 标签 */}
+                </div>
+                <div>
+                  <h3 className="font-bold text-neutral-900">{scan.product_name || "Unknown Item"}</h3>
+                  <div className="flex items-center gap-2 text-xs text-neutral-400">
+                    <span>{new Date(scan.created_at).toLocaleDateString()}</span>
+                    <span>•</span>
+                    <span className={scan.grade === 'black' ? 'text-neutral-500' : 'text-emerald-600'}>
+                      {scan.grade === 'black' ? 'Black Card' : 'Green Card'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className={`text-lg font-black ${scan.grade === 'green' ? 'text-emerald-500' : 'text-neutral-900'}`}>
+                {scan.score}
+              </div>
             </div>
-        </div>
-        <p className="mt-6 text-center text-sm text-neutral-500">
-           You scanned <span className="font-semibold text-neutral-900">24 products</span> this week. <br/> Keep up the good work!
-        </p>
-      </div>
+          </Link>
+        ))}
 
-      {/* --- 数据统计卡片 (Grid 布局) --- */}
-      <div className="grid grid-cols-2 gap-4">
-        <StatCard label="Excellent" count={12} color="bg-emerald-500" />
-        <StatCard label="Good" count={8} color="bg-emerald-400" />
-        <StatCard label="Poor" count={3} color="bg-amber-400" />
-        <StatCard label="Bad" count={1} color="bg-rose-500" />
-      </div>
-
-      {/* --- 底部 (模拟 Tab Bar) --- */}
-      {/* 实际项目中这里应该是 Layout 里的组件 */}
-      <div className="fixed bottom-6 left-6 right-6 h-16 rounded-full bg-neutral-900 text-white flex items-center justify-around shadow-2xl">
-         <div className="opacity-50">History</div>
-         <div className="h-12 w-12 rounded-full bg-emerald-500 flex items-center justify-center -mt-8 border-4 border-neutral-50">
-            <Scan size={24} />
-         </div>
-         <div className="opacity-100 font-medium">Stats</div>
+        {(!scans || scans.length === 0) && (
+          <div className="mt-10 text-center text-neutral-400">
+            <p>No scans yet.</p>
+            <Link href="/" className="mt-4 inline-block text-emerald-600 underline">Start scanning</Link>
+          </div>
+        )}
       </div>
     </div>
   );
-}
-
-function StatCard({ label, count, color }: { label: string, count: number, color: string }) {
-    return (
-        <div className="flex flex-col items-start rounded-2xl bg-white p-4 shadow-sm ring-1 ring-neutral-100">
-            <div className={`h-2 w-2 rounded-full ${color} mb-2`} />
-            <span className="text-3xl font-bold text-neutral-900">{count}</span>
-            <span className="text-sm text-neutral-500">{label}</span>
-        </div>
-    )
 }

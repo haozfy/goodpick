@@ -1,220 +1,79 @@
-// src/app/page.tsx
-"use client";
-
-import { useRouter } from "next/navigation";
-import { Scan, Search, Camera, Loader2, ChevronRight } from "lucide-react";
-import { useState, useRef } from "react";
+import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
+import { Camera, ArrowRight, History } from "lucide-react";
 
-export default function HomePage() {
-  const router = useRouter();
-  // 状态管理：空闲 | 压缩中 | AI分析中
-  const [status, setStatus] = useState<"idle" | "processing" | "analyzing">("idle");
-  const fileInputRef = useRef<HTMLInputElement>(null);
+export default async function Home() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
 
-  // 点击大卡片触发文件选择
-  const handleBigButtonClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  // 处理文件选择核心逻辑
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setStatus("processing");
-
-    try {
-      // 1. 压缩图片 (解决上传过大问题)
-      const compressedBase64 = await compressImage(file);
-      
-      setStatus("analyzing");
-
-      // 2. 发送给后端 API
-      const response = await fetch("/api/analyze-food", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: compressedBase64 }),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || "Server error");
-      }
-
-      // --- 3. 分析成功，跳转结果页 ---
-      const aiData = result.data;
-      console.log("AI Result:", aiData);
-
-      // 构造 URL 参数
-      const params = new URLSearchParams({
-        name: aiData.name,
-        score: aiData.score.toString(),
-        reason: aiData.reason,
-      });
-
-      // 跳转到 /scan-result 页面展示结果
-      router.push(`/scan-result?${params.toString()}`);
-
-    } catch (error: any) {
-      console.error("Error details:", error);
-      alert(`Analysis failed: ${error.message || "Please try again."}`);
-    } finally {
-      setStatus("idle");
-      // 清空输入框，允许重复上传同一张图
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  };
-
-  const isLoading = status !== "idle";
+  // 获取最近的 2 条记录
+  let recentScans = [];
+  if (user) {
+    const { data } = await supabase
+      .from("scans")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(2);
+    recentScans = data || [];
+  }
 
   return (
-    <div className="min-h-screen bg-neutral-50 pb-28">
-      {/* 隐藏的文件输入框 */}
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        onChange={handleFileChange} 
-        accept="image/*" 
-        // capture="environment" // 手机上取消注释这行可直接调用摄像头
-        className="hidden" 
-      />
-
-      {/* 顶部欢迎语 */}
-      <header className="px-6 pt-14 pb-6">
-        <h1 className="text-3xl font-bold text-neutral-900 leading-tight">
-          Hello, <br />
-          <span className="text-emerald-600">Health Seeker</span>
+    <main className="flex min-h-screen flex-col items-center bg-neutral-50 px-6 pt-20">
+      {/* 1. 头部 Slogan */}
+      <div className="mb-12 text-center">
+        <h1 className="text-4xl font-black text-neutral-900 tracking-tighter">
+          Good<span className="text-emerald-600">Pick</span>
         </h1>
-      </header>
-
-      {/* 搜索栏 */}
-      <div className="px-6 mb-8">
-        <div className="flex items-center gap-3 bg-white p-4 rounded-2xl shadow-sm ring-1 ring-neutral-100">
-          <Search size={20} className="text-neutral-400" />
-          <input 
-            type="text" 
-            placeholder="Search product..." 
-            className="w-full bg-transparent outline-none text-neutral-900 placeholder:text-neutral-400" 
-          />
-        </div>
+        <p className="mt-3 text-neutral-500">Scan food. Spot traps. Eat better.</p>
       </div>
 
-      {/* 核心功能：拍照分析卡片 */}
-      <div className="px-6 mb-10">
-        <div 
-            onClick={isLoading ? undefined : handleBigButtonClick} 
-            className={`relative overflow-hidden rounded-[32px] bg-neutral-900 p-8 text-white shadow-xl shadow-neutral-200 transition-transform ${isLoading ? "opacity-90 cursor-not-allowed" : "cursor-pointer active:scale-95"}`}
-        >
-          <div className="relative z-10 flex flex-col items-center text-center">
-            
-            {/* 动态图标：加载时旋转 */}
-            <div className={`mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-900/20 ring-4 ring-emerald-500/20 ${isLoading ? "animate-pulse" : ""}`}>
-              {isLoading ? (
-                <Loader2 size={32} className="animate-spin" />
-              ) : (
-                <Camera size={32} strokeWidth={2.5} />
-              )}
-            </div>
-            
-            <h2 className="text-2xl font-bold tracking-tight">
-              {status === "processing" && "Compressing..."}
-              {status === "analyzing" && "AI Analyzing..."}
-              {status === "idle" && "Snap & Judge Food"}
-            </h2>
-            <p className="mt-2 text-neutral-400 max-w-[200px]">
-              {isLoading 
-                ? "Please wait a moment." 
-                : "Take a photo, let AI judge its healthiness."}
-            </p>
-            
-            <button className="mt-8 w-full rounded-2xl bg-white py-4 text-sm font-bold text-neutral-900">
-              {isLoading ? "Processing..." : "Take a Photo"}
-            </button>
-          </div>
-          
-          {/* 装饰光晕 */}
-          <div className="absolute -top-20 -right-20 h-64 w-64 rounded-full bg-neutral-800 opacity-50 blur-3xl" />
-          <div className="absolute -bottom-20 -left-20 h-64 w-64 rounded-full bg-emerald-900 opacity-40 blur-3xl" />
-        </div>
-      </div>
-
-      {/* 历史记录 (模拟数据) */}
-      <div className="px-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold text-neutral-900">Recent Scans</h3>
-          <span className="text-sm font-medium text-emerald-600">See all</span>
-        </div>
-        <div className="space-y-3">
-             {/* 这里的 href 指向静态详情页，仅做演示 */}
-             <HistoryItem href="/product/123" name="Oat Milk Original" brand="Oatly" score={92} time="2m ago" />
-             <HistoryItem href="/product/456" name="Tomato Ketchup" brand="Heinz" score={45} time="1h ago" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// --- 辅助工具：图片压缩函数 ---
-const compressImage = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const MAX_WIDTH = 800; // 限制最大宽度为 800px
-        const scale = MAX_WIDTH / img.width;
-        
-        // 如果图片本来就很小，就不缩放
-        if (scale >= 1) {
-            resolve(event.target?.result as string);
-            return;
-        }
-
-        canvas.width = MAX_WIDTH;
-        canvas.height = img.height * scale;
-
-        const ctx = canvas.getContext("2d");
-        ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
-        
-        // 压缩为 JPEG, 质量 0.7
-        const compressedDataUrl = canvas.toDataURL("image/jpeg", 0.7);
-        resolve(compressedDataUrl);
-      };
-      img.onerror = (err) => reject(err);
-    };
-    reader.onerror = (err) => reject(err);
-  });
-};
-
-// 历史记录子组件
-function HistoryItem({ href, name, brand, score, time }: any) {
-    let colorClass = "bg-emerald-500";
-    if (score < 40) colorClass = "bg-rose-500";
-    else if (score < 70) colorClass = "bg-amber-400";
-  
-    return (
-      <Link href={href} className="flex items-center justify-between rounded-2xl bg-white p-3 shadow-sm ring-1 ring-neutral-100 transition-all hover:bg-neutral-50 active:scale-[0.99]">
-        <div className="flex items-center gap-4">
-          <div className="relative h-14 w-14 flex-shrink-0 rounded-xl bg-neutral-100 flex items-center justify-center text-xs text-neutral-400">
-              Img
-              <div className={`absolute -bottom-1 -right-1 h-5 w-5 rounded-full border-2 border-white ${colorClass} flex items-center justify-center text-[8px] font-bold text-white`}>
-                  {score}
-              </div>
-          </div>
-          <div>
-            <h4 className="font-semibold text-neutral-900 leading-tight">{name}</h4>
-            <p className="text-xs text-neutral-500 mt-0.5">{brand}</p>
-          </div>
-        </div>
-        <div className="flex items-center text-neutral-400 gap-1">
-          <span className="text-xs">{time}</span>
-          <ChevronRight size={16} />
+      {/* 2. 核心功能：巨大的拍照按钮 */}
+      {/* 这里将来会连接 API，现在先放 UI */}
+      <Link href="/scan-result" className="group relative flex h-48 w-48 items-center justify-center rounded-full bg-neutral-900 shadow-2xl transition-transform active:scale-95">
+        <div className="absolute inset-0 rounded-full border-2 border-white/20"></div>
+        <div className="flex flex-col items-center gap-2">
+          <Camera size={48} className="text-emerald-400" />
+          <span className="font-bold text-white">SCAN</span>
         </div>
       </Link>
-    );
+      
+      {/* 提示文案 */}
+      <p className="mt-6 text-xs font-medium text-neutral-400 uppercase tracking-widest">
+        Tap to verify ingredients
+      </p>
+
+      {/* 3. 最近记录 (Recent Scans) */}
+      {user && recentScans.length > 0 && (
+        <div className="mt-16 w-full max-w-sm">
+          <div className="mb-4 flex items-center justify-between px-1">
+            <h2 className="text-sm font-bold text-neutral-900">Recent Scans</h2>
+            <Link href="/dashboard" className="text-xs font-medium text-emerald-600 flex items-center gap-1">
+              View All <ArrowRight size={12}/>
+            </Link>
+          </div>
+          
+          <div className="space-y-3">
+            {recentScans.map((scan) => (
+              <div key={scan.id} className="flex items-center justify-between rounded-xl bg-white p-4 shadow-sm border border-neutral-100">
+                <div className="flex items-center gap-3">
+                  {/* 分数圆圈 */}
+                  <div className={`flex h-10 w-10 items-center justify-center rounded-full font-bold text-white ${scan.grade === 'green' ? 'bg-emerald-500' : 'bg-neutral-900'}`}>
+                    {scan.score}
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-neutral-800">{scan.product_name}</h3>
+                    <p className="text-xs text-neutral-400">{new Date(scan.created_at).toLocaleDateString()}</p>
+                  </div>
+                </div>
+                {/* 这里的 Link 指向结果页 */}
+                <Link href={`/scan-result?id=${scan.id}`} className="rounded-full bg-neutral-100 p-2 text-neutral-600">
+                  <ArrowRight size={16} />
+                </Link>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </main>
+  );
 }
