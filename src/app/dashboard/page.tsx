@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { ChevronRight, Sparkles, TriangleAlert } from "lucide-react";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { ChevronRight, Sparkles, TriangleAlert, RotateCw } from "lucide-react";
 
 type ScanResult = "good" | "caution" | "avoid";
 
@@ -14,23 +14,48 @@ type ScanRecord = {
   riskTags: string[]; // e.g. ["added_sugar","refined_oils"]
 };
 
-const STORAGE_KEY = "goodpick_scans";
-
 export default function DashboardPage() {
   const [scans, setScans] = useState<ScanRecord[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
+    setLoading(true);
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const parsed: ScanRecord[] = raw ? JSON.parse(raw) : [];
-      setScans(Array.isArray(parsed) ? parsed : []);
+      const res = await fetch("/api/insights?days=30&limit=80", {
+        cache: "no-store",
+      });
+
+      // 401/403/500 都按空处理（页面会显示 empty state）
+      if (!res.ok) {
+        setScans([]);
+        return;
+      }
+
+      const data = await res.json();
+      const rows = Array.isArray(data?.scans) ? data.scans : [];
+
+      const mapped: ScanRecord[] = rows.map((r: any) => ({
+        id: r.id,
+        createdAt: r.created_at,
+        productName: r.product_name ?? undefined,
+        // 你 analyze API 推荐写 verdict；为了兼容旧字段也兜底一下
+        result: (r.verdict ?? r.result ?? "caution") as ScanResult,
+        riskTags: Array.isArray(r.risk_tags) ? r.risk_tags : [],
+      }));
+
+      setScans(mapped);
     } catch {
       setScans([]);
     } finally {
+      setLoading(false);
       setLoaded(true);
     }
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const insights = useMemo(() => buildInsights(scans), [scans]);
 
@@ -53,18 +78,30 @@ export default function DashboardPage() {
                 Scan a few foods to see patterns in your choices.
               </div>
 
-              <Link
-                href="/"
-                className="mt-4 inline-flex items-center justify-center rounded-xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:opacity-90"
-              >
-                Start scanning <ChevronRight className="ml-1 h-4 w-4" />
-              </Link>
+              <div className="mt-4 flex items-center gap-2">
+                <Link
+                  href="/"
+                  className="inline-flex items-center justify-center rounded-xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:opacity-90"
+                >
+                  Start scanning <ChevronRight className="ml-1 h-4 w-4" />
+                </Link>
+
+                <button
+                  onClick={load}
+                  className="inline-flex items-center justify-center rounded-xl border border-neutral-200 bg-white px-4 py-2 text-sm font-semibold text-neutral-800 shadow-sm hover:bg-neutral-50"
+                >
+                  {loading ? "Refreshing..." : "Refresh"}
+                </button>
+              </div>
+
+              <div className="mt-3 text-xs text-neutral-500">
+                If you just scanned something, tap Refresh.
+              </div>
             </div>
           </div>
         </div>
 
-        {/* 可选：开发期快速造数据按钮，发布时删掉 */}
-        <DevSeeder onSeed={(seeded) => setScans(seeded)} />
+        <div className="h-24" />
       </PageShell>
     );
   }
@@ -74,7 +111,19 @@ export default function DashboardPage() {
     <PageShell title="Insights" subtitle="Your food choices, summarized.">
       {/* Summary */}
       <div className="mt-6 rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-        <div className="text-sm font-semibold text-neutral-900">Summary</div>
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-semibold text-neutral-900">Summary</div>
+
+          <button
+            onClick={load}
+            className="inline-flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-800 shadow-sm hover:bg-neutral-50"
+            aria-label="Refresh insights"
+          >
+            <RotateCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            {loading ? "Refreshing" : "Refresh"}
+          </button>
+        </div>
+
         <div className="mt-2 text-xl font-bold text-neutral-900">{insights.headline}</div>
         <div className="mt-1 text-sm text-neutral-600">{insights.subline}</div>
 
@@ -174,7 +223,6 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 /** 核心：把 scans 聚合成 Insights */
 function buildInsights(scans: ScanRecord[]) {
-  // 统计结果分布
   const counts = { good: 0, caution: 0, avoid: 0 } as Record<ScanResult, number>;
   const riskCount = new Map<string, number>();
 
@@ -185,7 +233,6 @@ function buildInsights(scans: ScanRecord[]) {
     }
   }
 
-  // mostly
   const mostly: ScanResult =
     counts.good >= counts.caution && counts.good >= counts.avoid
       ? "good"
@@ -196,7 +243,6 @@ function buildInsights(scans: ScanRecord[]) {
   const mostlyLabel =
     mostly === "good" ? "Good" : mostly === "caution" ? "Caution" : "Avoid";
 
-  // top risks (top 3)
   const riskSignals = Array.from(riskCount.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
@@ -204,7 +250,6 @@ function buildInsights(scans: ScanRecord[]) {
 
   const topRiskLabel = riskSignals[0]?.tag ? shortRiskLabel(riskSignals[0].tag) : null;
 
-  // headline/subline（更像人说话）
   let headline = "Mostly good choices 👍";
   let subline = "Keep it up — your scans look generally clean.";
 
@@ -217,13 +262,13 @@ function buildInsights(scans: ScanRecord[]) {
     subline = "You’re scanning more ultra-processed foods. Swaps will help fast.";
   }
 
-  // patterns（少而准）
   const patterns: string[] = [];
-  patterns.push(mostly === "good" ? "Mostly Good" : mostly === "caution" ? "Mixed choices" : "More Avoid items");
+  patterns.push(
+    mostly === "good" ? "Mostly Good" : mostly === "caution" ? "Mixed choices" : "More Avoid items"
+  );
   if (counts.avoid > 0) patterns.push("Avoid items show up sometimes");
   if (counts.good > 0) patterns.push("You do pick clean options too");
 
-  // suggestions（最多 2 条）
   const suggestions: string[] = [];
   const top = riskSignals[0]?.tag;
 
@@ -264,6 +309,9 @@ function humanizeRiskTag(tag: string) {
     refined_carbs: "Refined carbs",
     ultra_processed: "Ultra-processed",
     high_sodium: "High sodium",
+    many_additives: "Many additives",
+    low_fiber: "Low fiber",
+    low_protein: "Low protein",
   };
   return map[tag] ?? tag.replaceAll("_", " ");
 }
@@ -275,46 +323,11 @@ function shortRiskLabel(tag: string) {
     refined_oils: "Oils",
     refined_carbs: "Carbs",
     additives: "Additives",
+    many_additives: "Additives",
     ultra_processed: "Processed",
     high_sodium: "Sodium",
+    low_fiber: "Fiber",
+    low_protein: "Protein",
   };
   return map[tag] ?? "Risk";
-}
-
-/** 开发期：一键造几条扫描记录，让你马上看到 Insights（发布删） */
-function DevSeeder({ onSeed }: { onSeed: (seeded: ScanRecord[]) => void }) {
-  return (
-    <button
-      onClick={() => {
-        const seeded: ScanRecord[] = [
-          {
-            id: crypto.randomUUID(),
-            createdAt: new Date().toISOString(),
-            productName: "Ritz Snowflake Flocons",
-            result: "avoid",
-            riskTags: ["refined_carbs", "added_sugar", "ultra_processed"],
-          },
-          {
-            id: crypto.randomUUID(),
-            createdAt: new Date().toISOString(),
-            productName: "Crunchmaster Multi-Grain",
-            result: "good",
-            riskTags: [],
-          },
-          {
-            id: crypto.randomUUID(),
-            createdAt: new Date().toISOString(),
-            productName: "Some Snack",
-            result: "caution",
-            riskTags: ["refined_oils"],
-          },
-        ];
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
-        onSeed(seeded);
-      }}
-      className="mt-4 w-full rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm font-semibold text-neutral-800 shadow-sm hover:bg-neutral-50"
-    >
-      (Dev) Seed sample scans
-    </button>
-  );
 }
