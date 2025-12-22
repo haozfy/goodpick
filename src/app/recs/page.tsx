@@ -1,107 +1,136 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
-import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
-import { ArrowLeft, Sparkles, Loader2, ShoppingBag } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { ChevronRight, ArrowLeft } from "lucide-react";
 
-function RecsContent() {
-  const searchParams = useSearchParams();
-  const originId = searchParams.get("originId"); // 获取来源产品的 ID
-  const [alternatives, setAlternatives] = useState<any[]>([]);
+type RecItem = {
+  name: string;
+  reason: string;
+  price: "$" | "$$" | "$$$";
+};
+
+export default function RecsPage() {
+  const params = useSearchParams();
+  const router = useRouter();
+  const scanId = params.get("scanId");
+
   const [loading, setLoading] = useState(true);
+  const [verdict, setVerdict] = useState<"good" | "caution" | "avoid">("good");
+  const [analysis, setAnalysis] = useState<string>("");
+  const [items, setItems] = useState<RecItem[]>([]);
 
   useEffect(() => {
-    if (!originId) return;
+    if (!scanId) return;
 
-    const fetchAlternatives = async () => {
-      const supabase = createClient();
-      // 去 scans 表里查这个产品的 alternatives 字段
-      const { data, error } = await supabase
-        .from("scans")
-        .select("alternatives, product_name")
-        .eq("id", originId)
-        .single();
+    (async () => {
+      setLoading(true);
+      const res = await fetch(`/api/recs?scanId=${scanId}`, {
+        cache: "no-store",
+      });
+      const data = await res.json();
 
-      if (data?.alternatives) {
-        setAlternatives(data.alternatives);
-      }
+      setVerdict(data.verdict);
+      setAnalysis(data.analysis || "");
+      setItems(Array.isArray(data.alternatives) ? data.alternatives : []);
       setLoading(false);
-    };
+    })();
+  }, [scanId]);
 
-    fetchAlternatives();
-  }, [originId]);
+  if (!scanId) {
+    return <Empty msg="Missing scan id." />;
+  }
 
   if (loading) {
+    return <Empty msg="Loading recommendations..." />;
+  }
+
+  // Good → 空态（刻意的）
+  if (verdict === "good") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-neutral-50">
-        <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
-      </div>
+      <PageShell>
+        <h1 className="text-2xl font-black text-neutral-900">Good choice 👍</h1>
+        <p className="mt-2 text-sm text-neutral-600">
+          No swaps needed. This one fits your profile well.
+        </p>
+
+        <button
+          onClick={() => router.push("/")}
+          className="mt-6 rounded-xl bg-neutral-900 px-4 py-2 text-sm font-bold text-white"
+        >
+          Scan another
+        </button>
+      </PageShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-neutral-50 px-6 py-8">
-      {/* 顶部 Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-4 mb-6">
-          <Link href={originId ? `/scan-result?id=${originId}` : "/"} className="rounded-full bg-white p-2 text-neutral-900 shadow-sm border border-neutral-200">
-            <ArrowLeft size={20} />
-          </Link>
-          <h1 className="text-xl font-black text-neutral-900">Better Choices</h1>
-        </div>
-        
-        <div className="rounded-xl bg-emerald-100 p-4 text-emerald-800 text-sm font-medium">
-          Found <strong>{alternatives.length}</strong> healthier alternatives for you based on ingredients.
-        </div>
+    <PageShell>
+      {/* 顶部缓冲判断 */}
+      <h1 className="text-2xl font-black text-neutral-900">
+        {verdict === "avoid"
+          ? "Better to skip this one"
+          : "Not ideal — easy to improve"}
+      </h1>
+
+      <p className="mt-2 text-sm text-neutral-600">{analysis}</p>
+
+      {/* 替代品 */}
+      <div className="mt-6 space-y-4">
+        {items.slice(0, 3).map((item, idx) => (
+          <div
+            key={idx}
+            className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm"
+          >
+            <div className="flex items-center justify-between">
+              <div className="font-bold text-neutral-900">{item.name}</div>
+              <div className="text-xs font-bold text-neutral-500">
+                {item.price}
+              </div>
+            </div>
+            <div className="mt-1 text-sm text-neutral-600">
+              {item.reason}
+            </div>
+          </div>
+        ))}
       </div>
 
-      {/* 替代品列表 */}
-      <div className="space-y-4">
-        {alternatives.length > 0 ? (
-          alternatives.map((item, i) => (
-            <div key={i} className="flex flex-col gap-3 rounded-2xl bg-white p-5 shadow-[0_2px_15px_rgba(0,0,0,0.03)] border border-neutral-100 transition-all hover:border-emerald-200">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-                    <Sparkles size={18} />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-bold text-neutral-900">{item.name}</h3>
-                    <span className="text-[10px] font-bold bg-neutral-100 text-neutral-500 px-2 py-0.5 rounded">
-                      {item.price || "$$"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="pl-[52px]">
-                <p className="text-sm text-neutral-600 leading-relaxed">
-                  {item.reason}
-                </p>
-              </div>
-              
-              {/* 模拟购买按钮 (可选) */}
-              <button className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-neutral-900 py-2.5 text-xs font-bold text-white active:scale-95 transition-transform">
-                <ShoppingBag size={14} /> Find in Store
-              </button>
-            </div>
-          ))
-        ) : (
-          <div className="text-center py-10 text-neutral-400">
-            <p>No specific alternatives found.</p>
-          </div>
-        )}
+      {/* 底部提示 */}
+      <div className="mt-6 text-xs text-neutral-500">
+        Small swaps like this improve your overall profile.
       </div>
-    </div>
+
+      <div className="mt-8 flex justify-between">
+        <button
+          onClick={() => router.back()}
+          className="inline-flex items-center gap-1 text-sm font-bold text-neutral-600"
+        >
+          <ArrowLeft size={14} /> Back
+        </button>
+
+        <button
+          onClick={() => router.push("/")}
+          className="inline-flex items-center gap-1 text-sm font-bold text-emerald-600"
+        >
+          Scan another <ChevronRight size={14} />
+        </button>
+      </div>
+    </PageShell>
   );
 }
 
-export default function RecsPage() {
+function PageShell({ children }: { children: React.ReactNode }) {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-neutral-50"></div>}>
-      <RecsContent />
-    </Suspense>
+    <main className="min-h-screen bg-neutral-50 px-6 pt-14 pb-24">
+      <div className="mx-auto max-w-md">{children}</div>
+    </main>
+  );
+}
+
+function Empty({ msg }: { msg: string }) {
+  return (
+    <main className="min-h-screen flex items-center justify-center text-sm text-neutral-500">
+      {msg}
+    </main>
   );
 }
