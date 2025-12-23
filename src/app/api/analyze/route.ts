@@ -32,7 +32,6 @@ type AIResult = {
   alternatives: Alternative[];
 };
 
-// ✅ 统一：不付费之前，无论是否登录，都免费 3 次
 const TRIAL_LIMIT = 3;
 
 const ALLOWED_TAGS = new Set([
@@ -61,18 +60,15 @@ function clampInt(n: any, min: number, max: number) {
   const x = Number.isFinite(Number(n)) ? Math.trunc(Number(n)) : min;
   return Math.min(max, Math.max(min, x));
 }
-
 function clampNum(n: any, min: number, max: number) {
   const x = Number.isFinite(Number(n)) ? Number(n) : min;
   return Math.min(max, Math.max(min, x));
 }
-
 function verdictFromScore(score: number): Verdict {
   if (score >= 80) return "good";
   if (score >= 50) return "caution";
   return "avoid";
 }
-
 function safeJsonParse(content: string) {
   const cleaned = content.replace(/```json/g, "").replace(/```/g, "").trim();
   return JSON.parse(cleaned);
@@ -84,39 +80,19 @@ function normalizeAlternative(a: any): Alternative {
   const price = (["$", "$$", "$$$"].includes(a?.price) ? a.price : "$$") as "$" | "$$" | "$$$";
 
   const sodium_mg =
-    a?.sodium_mg === null
-      ? null
-      : Number.isFinite(Number(a?.sodium_mg))
-        ? clampInt(a.sodium_mg, 0, 5000)
-        : undefined;
+    a?.sodium_mg === null ? null : Number.isFinite(Number(a?.sodium_mg)) ? clampInt(a.sodium_mg, 0, 5000) : undefined;
 
   const added_sugar_g =
-    a?.added_sugar_g === null
-      ? null
-      : Number.isFinite(Number(a?.added_sugar_g))
-        ? clampNum(a.added_sugar_g, 0, 200)
-        : undefined;
+    a?.added_sugar_g === null ? null : Number.isFinite(Number(a?.added_sugar_g)) ? clampNum(a.added_sugar_g, 0, 200) : undefined;
 
   const cholesterol_mg =
-    a?.cholesterol_mg === null
-      ? null
-      : Number.isFinite(Number(a?.cholesterol_mg))
-        ? clampInt(a.cholesterol_mg, 0, 2000)
-        : undefined;
+    a?.cholesterol_mg === null ? null : Number.isFinite(Number(a?.cholesterol_mg)) ? clampInt(a.cholesterol_mg, 0, 2000) : undefined;
 
   const ingredient_count =
-    a?.ingredient_count === null
-      ? null
-      : Number.isFinite(Number(a?.ingredient_count))
-        ? clampInt(a.ingredient_count, 0, 200)
-        : undefined;
+    a?.ingredient_count === null ? null : Number.isFinite(Number(a?.ingredient_count)) ? clampInt(a.ingredient_count, 0, 200) : undefined;
 
   const has_sweeteners =
-    typeof a?.has_sweeteners === "boolean"
-      ? a.has_sweeteners
-      : a?.has_sweeteners === null
-        ? null
-        : undefined;
+    typeof a?.has_sweeteners === "boolean" ? a.has_sweeteners : a?.has_sweeteners === null ? null : undefined;
 
   return { name, reason, price, sodium_mg, added_sugar_g, cholesterol_mg, ingredient_count, has_sweeteners };
 }
@@ -144,10 +120,7 @@ function normalizeAI(raw: any): AIResult {
 
   let alternatives: Alternative[] = [];
   if (verdict !== "good" && Array.isArray(raw?.alternatives)) {
-    alternatives = raw.alternatives
-      .slice(0, 3)
-      .map(normalizeAlternative)
-      .filter((a: Alternative) => a.name.length > 0);
+    alternatives = raw.alternatives.slice(0, 3).map(normalizeAlternative).filter((a: Alternative) => a.name.length > 0);
   }
 
   return { product_name, score, verdict, risk_tags, analysis, triggers, alternatives };
@@ -166,24 +139,63 @@ function prefsToPrompt(p: Prefs) {
 function genAnonId() {
   return crypto.randomUUID();
 }
-
 function getAnonIdFromCookie(cookieHeader: string) {
   const match = cookieHeader.match(/(?:^|;\s*)gp_anon=([^;]+)/);
   return match?.[1] ? decodeURIComponent(match[1]) : null;
 }
 
-/**
- * ✅ 只修未登录：把裸 base64 变成合法 data url（Safari 需要）
- * - 已经是 data:image/... 的：不动
- * - base64,xxxx 的：补 data:image/jpeg;
- * - 其他默认当 jpeg：data:image/jpeg;base64,xxxx
- */
-function normalizeDataImageUrlForAnon(input: string) {
+// ✅ 判断是否“像 base64”
+function looksLikeBase64(s: string) {
+  const t = s.trim();
+  if (t.length < 100) return false;
+  // 允许换行/空格的情况先去掉
+  const cleaned = t.replace(/\s+/g, "");
+  return /^[A-Za-z0-9+/=]+$/.test(cleaned);
+}
+
+// ✅ 服务器端把 URL 的图片拉下来转 data url（仅用于未登录兜底）
+async function fetchToDataUrl(url: string) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Failed to fetch image: ${r.status}`);
+  const contentType = r.headers.get("content-type") || "image/jpeg";
+  const buf = Buffer.from(await r.arrayBuffer());
+  return `data:${contentType};base64,${buf.toString("base64")}`;
+}
+
+// ✅ 只用于未登录：把各种输入规整成 OpenAI 可吃的 image_url.url
+async function normalizeAnonImage(req: Request, input: string) {
   const s = String(input || "").trim();
-  if (!s) return s;
+  if (!s) throw new Error("Invalid image payload");
+
+  // 1) 已经是 data url
   if (s.startsWith("data:image/")) return s;
+
+  // 2) blob: —— 服务器端无法读取（必须前端转 base64 或上传成 https）
+  if (s.startsWith("blob:")) {
+    const err: any = new Error("BLOB_URL_NOT_SUPPORTED");
+    err.code = "BLOB_URL_NOT_SUPPORTED";
+    throw err;
+  }
+
+  // 3) http(s) url —— 直接用（或你也可以 fetchToDataUrl，更稳）
+  if (s.startsWith("http://") || s.startsWith("https://")) return s;
+
+  // 4) 相对路径 /xxx —— 拼绝对 URL 拉取转 data url（Safari/未登录常见）
+  if (s.startsWith("/")) {
+    const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
+    const proto = req.headers.get("x-forwarded-proto") || "https";
+    if (!host) throw new Error("Missing host header");
+    const abs = `${proto}://${host}${s}`;
+    return await fetchToDataUrl(abs);
+  }
+
+  // 5) 裸 base64 —— 补 data url
+  if (looksLikeBase64(s)) return `data:image/jpeg;base64,${s.replace(/\s+/g, "")}`;
+
+  // 6) 兼容 "base64,xxxx"
   if (s.startsWith("base64,")) return `data:image/jpeg;${s}`;
-  return `data:image/jpeg;base64,${s}`;
+
+  throw new Error("Invalid image payload");
 }
 
 export async function POST(req: Request) {
@@ -192,11 +204,8 @@ export async function POST(req: Request) {
     if (!imageBase64) return NextResponse.json({ error: "No image provided" }, { status: 400 });
 
     const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const { data: { user } } = await supabase.auth.getUser();
 
-    // ✅ 无论是否登录，都确保有 anon_id（cookie）用于统一免费计数
     const cookieHeader = req.headers.get("cookie") || "";
     let anonId = getAnonIdFromCookie(cookieHeader);
     let shouldSetAnonCookie = false;
@@ -206,7 +215,7 @@ export async function POST(req: Request) {
       shouldSetAnonCookie = true;
     }
 
-    // 0) 偏好：登录用户从 user_preferences；未登录默认
+    // prefs
     let prefs: Prefs = { ...DEFAULT_PREFS };
     if (user) {
       const { data: prefRow } = await supabase
@@ -214,18 +223,17 @@ export async function POST(req: Request) {
         .select("low_sodium, low_sugar, low_cholesterol, avoid_sweeteners, prefer_simple_ingredients")
         .eq("user_id", user.id)
         .maybeSingle();
-
       prefs = { ...DEFAULT_PREFS, ...(prefRow || {}) };
     }
 
-    // 1) 是否 Pro（登录才有）
+    // pro
     let isPro = false;
     if (user) {
       const { data: profile } = await supabase.from("profiles").select("is_pro").eq("id", user.id).single();
       isPro = !!profile?.is_pro;
     }
 
-    // 2) 配额：非 Pro（包括未登录）统一按 anon_scans 计数，达到 3 次就挡住
+    // quota (按 anon_id 统一计数)
     if (!isPro) {
       const { count, error: countError } = await supabase
         .from("anon_scans")
@@ -233,10 +241,8 @@ export async function POST(req: Request) {
         .eq("anon_id", anonId);
 
       if (countError) throw new Error("Failed to check quota");
-
       if (count !== null && count >= TRIAL_LIMIT) {
         const res = NextResponse.json({ error: "Free limit reached", code: "LIMIT_REACHED" }, { status: 403 });
-
         if (shouldSetAnonCookie && anonId) {
           res.cookies.set("gp_anon", anonId, {
             path: "/",
@@ -250,10 +256,24 @@ export async function POST(req: Request) {
       }
     }
 
-    // ✅ 关键：只修未登录的 image_url（登录逻辑保持原样）
-    const imageForOpenAI = user ? imageBase64 : normalizeDataImageUrlForAnon(imageBase64);
+    // ✅ 登录逻辑不动：仍用原 imageBase64
+    // ✅ 未登录：强力规范化（解决 Safari pattern）
+    let imageForOpenAI = imageBase64 as string;
+    if (!user) {
+      try {
+        imageForOpenAI = await normalizeAnonImage(req, imageBase64);
+      } catch (e: any) {
+        // 给前端一个明确 code，别再弹 Safari 那种鬼提示
+        const code = e?.code || "BAD_IMAGE_PAYLOAD";
+        const msg =
+          code === "BLOB_URL_NOT_SUPPORTED"
+            ? "Please use base64 image (not blob URL) for anonymous scan."
+            : "Invalid image payload.";
+        return NextResponse.json({ error: msg, code }, { status: 400 });
+      }
+    }
 
-    // 3) OpenAI
+    // OpenAI
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -341,10 +361,7 @@ alternatives rule:
       return NextResponse.json({ error: "AI failed to analyze" }, { status: 500 });
     }
 
-    // 4) 写入：非 Pro 时写 anon_scans 用于统一计数；登录用户另外写 scans 作为账号历史
-    let saved: any = null;
-
-    // ✅ 4.1 非 Pro：写入 anon_scans（计数真源）
+    // 写 anon_scans 计数真源（非 pro）
     if (!isPro) {
       const { error: anonErr } = await supabase.from("anon_scans").insert({
         anon_id: anonId,
@@ -356,11 +373,11 @@ alternatives rule:
         triggers: aiResult.triggers,
         alternatives: aiResult.alternatives,
       });
-
       if (anonErr) throw new Error(anonErr.message);
     }
 
-    // ✅ 4.2 登录用户：写入 scans（保留你的原逻辑）
+    // 登录写 scans（保留原行为）
+    let saved: any = null;
     if (user) {
       const { data: scanData, error: dbError } = await supabase
         .from("scans")
@@ -382,7 +399,6 @@ alternatives rule:
       if (dbError) throw new Error(dbError.message);
       saved = scanData;
     } else {
-      // 未登录：返回一个一致结构，不暴露剩余次数
       saved = {
         id: null,
         created_at: new Date().toISOString(),
@@ -396,12 +412,8 @@ alternatives rule:
       };
     }
 
-    const res = NextResponse.json({
-      id: saved?.id ? String(saved.id) : null,
-      scan: saved,
-    });
+    const res = NextResponse.json({ id: saved?.id ? String(saved.id) : null, scan: saved });
 
-    // ✅ set-cookie：无论是否登录，只要本次生成了 anonId，就写回去
     if (shouldSetAnonCookie && anonId) {
       res.cookies.set("gp_anon", anonId, {
         path: "/",
