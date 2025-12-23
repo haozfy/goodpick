@@ -14,8 +14,10 @@ export default function RecsClient() {
   const scanIdFromUrl = params.get("scanId") || params.get("scan");
   const [scanId, setScanId] = useState<string | null>(scanIdFromUrl);
 
-  const [bootLoading, setBootLoading] = useState<boolean>(true); // 找 scanId
-  const [recsLoading, setRecsLoading] = useState<boolean>(false); // 拉 recs
+  // ✅ 解决闪屏：把“找 scanId”和“拉 recs”拆开
+  const [bootLoading, setBootLoading] = useState(true);
+  const [recsLoading, setRecsLoading] = useState(false);
+  const loading = bootLoading || recsLoading;
 
   const [verdict, setVerdict] = useState<Verdict>("good");
   const [analysis, setAnalysis] = useState("");
@@ -23,6 +25,9 @@ export default function RecsClient() {
   const [score, setScore] = useState<number | null>(null);
   const [items, setItems] = useState<RecItem[]>([]);
   const [error, setError] = useState<string>("");
+
+  // ✅ 新增：从 /api/recs 返回的用户偏好标签
+  const [prefLabels, setPrefLabels] = useState<string[]>([]);
 
   // 1) 初始化 scanId：URL 优先，否则取 last-scan
   useEffect(() => {
@@ -66,7 +71,7 @@ export default function RecsClient() {
     };
   }, [scanIdFromUrl]);
 
-  // 2) 拉 recs
+  // 2) 拉 recs（现在 /api/recs 会按用户偏好过滤/排序，并返回 preferences 标签）
   useEffect(() => {
     if (!scanId) return;
 
@@ -81,7 +86,6 @@ export default function RecsClient() {
         const data = await res.json();
 
         if (!res.ok) throw new Error(data?.error || "Failed to load recs.");
-
         if (cancelled) return;
 
         setVerdict((data.verdict as Verdict) || "good");
@@ -89,6 +93,9 @@ export default function RecsClient() {
         setProductName(data.productName || "");
         setScore(typeof data.score === "number" ? data.score : null);
         setItems(Array.isArray(data.alternatives) ? data.alternatives : []);
+
+        // ✅ 新增：显示 “Personalized for …”
+        setPrefLabels(Array.isArray(data.preferences) ? data.preferences : []);
       } catch (e: any) {
         if (!cancelled) setError(e?.message || "Failed to load recommendations.");
       } finally {
@@ -100,8 +107,6 @@ export default function RecsClient() {
       cancelled = true;
     };
   }, [scanId]);
-
-  const loading = bootLoading || recsLoading;
 
   const header = useMemo(() => {
     if (verdict === "avoid") return "Skip it. Swap once to improve fast.";
@@ -119,7 +124,7 @@ export default function RecsClient() {
     );
   }
 
-  // 没扫过 / 没登录 / last-scan 失败
+  // ✅ 没扫过 / 没登录 / last-scan 失败
   if (!scanId) {
     return (
       <Shell>
@@ -129,7 +134,7 @@ export default function RecsClient() {
     );
   }
 
-  // 拉取 recs 出错
+  // ✅ 拉取 recs 出错
   if (error) {
     return (
       <Shell>
@@ -139,28 +144,21 @@ export default function RecsClient() {
           <div className="mt-2 text-xs text-neutral-500">scanId: {scanId}</div>
         </Card>
         <Row>
-          <Ghost onClick={() => router.back()}>
-            <ArrowLeft size={14} /> Back
-          </Ghost>
-          <Primary onClick={() => router.push("/")}>
-            Scan another <ChevronRight size={14} />
-          </Primary>
+          <Ghost onClick={() => router.back()}><ArrowLeft size={14}/> Back</Ghost>
+          <Primary onClick={() => router.push("/")}>Scan another <ChevronRight size={14}/></Primary>
         </Row>
       </Shell>
     );
   }
 
+  // ✅ Good 不显示替代
   if (verdict === "good") {
     return (
       <Shell>
         <Title title="Good choice 👍" sub="No swaps needed. Keep going." />
         <Row>
-          <Ghost onClick={() => router.back()}>
-            <ArrowLeft size={14} /> Back
-          </Ghost>
-          <Primary onClick={() => router.push("/")}>
-            Scan another <ChevronRight size={14} />
-          </Primary>
+          <Ghost onClick={() => router.back()}><ArrowLeft size={14}/> Back</Ghost>
+          <Primary onClick={() => router.push("/")}>Scan another <ChevronRight size={14}/></Primary>
         </Row>
       </Shell>
     );
@@ -182,6 +180,13 @@ export default function RecsClient() {
             {score !== null ? <span className="text-xs text-white/70">Score {score}</span> : null}
           </div>
 
+          {/* ✅ 个性化标签（可选显示） */}
+          {prefLabels.length ? (
+            <div className="mt-2 text-xs text-white/70">
+              Personalized for: {prefLabels.join(" · ")}
+            </div>
+          ) : null}
+
           <div className="mt-3 text-sm text-white/85">
             <span className="font-bold">{productName ? `${productName}: ` : ""}</span>
             {analysis || "Here are cleaner options in the same category."}
@@ -194,41 +199,45 @@ export default function RecsClient() {
 
       <div className="mt-6">
         <div className="text-sm font-black text-neutral-900">Cleaner alternatives</div>
+
+        {/* ✅ 如果你更想把 personalized 放到这里也可以（现在在 header 里） */}
+        {/* {prefLabels.length ? (
+          <div className="mt-1 text-xs text-neutral-500">
+            Personalized for: {prefLabels.join(" · ")}
+          </div>
+        ) : null} */}
+
         <div className="mt-3 space-y-4">
-          {(items.length ? items : fallbackRecs(verdict))
-            .slice(0, 3)
-            .map((it, idx) => (
-              <div key={idx} className="rounded-[24px] bg-white p-5 shadow-sm ring-1 ring-neutral-100">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-black text-neutral-900 truncate">{it.name}</div>
-                    <div className="mt-2 flex items-start gap-2">
-                      <div className="mt-0.5 rounded-xl bg-neutral-100 p-2">
-                        <ShieldCheck className="h-4 w-4 text-neutral-700" />
-                      </div>
-                      <div className="text-sm text-neutral-600">{it.reason}</div>
+          {(items.length ? items : fallbackRecs(verdict)).slice(0, 3).map((it, idx) => (
+            <div key={idx} className="rounded-[24px] bg-white p-5 shadow-sm ring-1 ring-neutral-100">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-black text-neutral-900 truncate">{it.name}</div>
+                  <div className="mt-2 flex items-start gap-2">
+                    <div className="mt-0.5 rounded-xl bg-neutral-100 p-2">
+                      <ShieldCheck className="h-4 w-4 text-neutral-700" />
                     </div>
+                    <div className="text-sm text-neutral-600">{it.reason}</div>
                   </div>
-                  {it.price ? (
-                    <span className="shrink-0 rounded-full bg-neutral-100 px-3 py-1 text-xs font-bold text-neutral-600">
-                      {it.price}
-                    </span>
-                  ) : null}
                 </div>
+                {it.price ? (
+                  <span className="shrink-0 rounded-full bg-neutral-100 px-3 py-1 text-xs font-bold text-neutral-600">
+                    {it.price}
+                  </span>
+                ) : null}
               </div>
-            ))}
+            </div>
+          ))}
         </div>
 
-        <div className="mt-6 text-xs text-neutral-500">Tip: one small swap per week changes your trend.</div>
+        <div className="mt-6 text-xs text-neutral-500">
+          Tip: one small swap per week changes your trend.
+        </div>
       </div>
 
       <Row>
-        <Ghost onClick={() => router.back()}>
-          <ArrowLeft size={14} /> Back
-        </Ghost>
-        <Primary onClick={() => router.push("/")}>
-          Scan another <ChevronRight size={14} />
-        </Primary>
+        <Ghost onClick={() => router.back()}><ArrowLeft size={14}/> Back</Ghost>
+        <Primary onClick={() => router.push("/")}>Scan another <ChevronRight size={14}/></Primary>
       </Row>
 
       <div className="h-10" />
@@ -236,7 +245,7 @@ export default function RecsClient() {
   );
 }
 
-/* ---------- UI helpers (你原来的不动) ---------- */
+/* ---------- UI helpers ---------- */
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
@@ -258,9 +267,11 @@ function Title({ title, sub }: { title: string; sub?: string }) {
 function Card({ children }: { children: React.ReactNode }) {
   return <div className="mt-6 rounded-[24px] bg-white p-5 shadow-sm ring-1 ring-neutral-100">{children}</div>;
 }
+
 function Row({ children }: { children: React.ReactNode }) {
   return <div className="mt-8 flex justify-between">{children}</div>;
 }
+
 function Primary({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
   return (
     <button
@@ -271,6 +282,7 @@ function Primary({ children, onClick }: { children: React.ReactNode; onClick: ()
     </button>
   );
 }
+
 function Ghost({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
   return (
     <button
@@ -290,8 +302,7 @@ function Pill({ verdict }: { verdict: Verdict }) {
 
   return (
     <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-black ring-1 ${cfg.cls}`}>
-      {cfg.icon}
-      {cfg.text}
+      {cfg.icon}{cfg.text}
     </span>
   );
 }
