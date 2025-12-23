@@ -167,6 +167,26 @@ async function readJsonBody(req: Request) {
   }
 }
 
+function withAnonCookie(
+  res: NextResponse,
+  shouldSetAnonCookie: boolean,
+  anonId: string | null
+) {
+  if (!shouldSetAnonCookie || !anonId) return res;
+
+  // ✅ 本地 http 不要 secure，否则 cookie 写不进去（导致 anonId 不稳定）
+  const secure = process.env.NODE_ENV === "production";
+
+  res.cookies.set("gp_anon", anonId, {
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+    secure,
+    maxAge: 60 * 60 * 24 * 365,
+  });
+  return res;
+}
+
 export async function POST(req: Request) {
   try {
     const supabase = await createClient();
@@ -197,7 +217,11 @@ export async function POST(req: Request) {
     // ✅ 是否 Pro：登录才读取
     let isPro = false;
     if (user) {
-      const { data: profile } = await supabase.from("profiles").select("is_pro").eq("id", user.id).single();
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("is_pro")
+        .eq("id", user.id)
+        .single();
       isPro = !!profile?.is_pro;
     }
 
@@ -209,28 +233,25 @@ export async function POST(req: Request) {
         .eq("anon_id", anonId);
 
       if (countError) throw new Error("Failed to check quota");
+
       if (count !== null && count >= TRIAL_LIMIT) {
-        const res = NextResponse.json({ error: "Free limit reached", code: "LIMIT_REACHED" }, { status: 403 });
-        if (shouldSetAnonCookie && anonId) {
-          res.cookies.set("gp_anon", anonId, {
-            path: "/",
-            httpOnly: true,
-            sameSite: "lax",
-            secure: true,
-            maxAge: 60 * 60 * 24 * 365,
-          });
-        }
-        return res;
+        const res = NextResponse.json(
+          { error: "Free limit reached", code: "LIMIT_REACHED" },
+          { status: 403 }
+        );
+        return withAnonCookie(res, shouldSetAnonCookie, anonId);
       }
     }
 
     // =========================
-    // ✅ 读取图片：未登录用原图 file；登录用原 JSON 方案不变
+    // ✅ 读取图片：按 Content-Type 自动识别（最稳）
+    // - multipart/form-data：读 file（未登录原图）
+    // - application/json：读 imageBase64（登录老方案）
     // =========================
+    const contentType = req.headers.get("content-type") || "";
     let imageForOpenAI: string | null = null;
 
-    if (!user) {
-      // 未登录：必须走原图 file（multipart/form-data）
+    if (contentType.includes("multipart/form-data")) {
       const form = await req.formData();
       const file = form.get("image") as File | null;
 
@@ -239,44 +260,36 @@ export async function POST(req: Request) {
           { error: "No image file provided", code: "NO_IMAGE_FILE" },
           { status: 400 }
         );
-        if (shouldSetAnonCookie && anonId) {
-          res.cookies.set("gp_anon", anonId, {
-            path: "/",
-            httpOnly: true,
-            sameSite: "lax",
-            secure: true,
-            maxAge: 60 * 60 * 24 * 365,
-          });
-        }
-        return res;
+        return withAnonCookie(res, shouldSetAnonCookie, anonId);
       }
 
-      if (file.size > ANON_MAX_IMAGE_BYTES) {
+      if (!user && file.size > ANON_MAX_IMAGE_BYTES) {
         const res = NextResponse.json(
           { error: "Image too large", code: "IMAGE_TOO_LARGE" },
           { status: 413 }
         );
-        if (shouldSetAnonCookie && anonId) {
-          res.cookies.set("gp_anon", anonId, {
-            path: "/",
-            httpOnly: true,
-            sameSite: "lax",
-            secure: true,
-            maxAge: 60 * 60 * 24 * 365,
-          });
-        }
-        return res;
+        return withAnonCookie(res, shouldSetAnonCookie, anonId);
       }
 
       const buf = Buffer.from(await file.arrayBuffer());
       imageForOpenAI = fileToDataUrl(buf, file.type);
-    } else {
-      // 登录：保持你原来的 JSON + imageBase64 逻辑不变
+    } else if (contentType.includes("application/json")) {
       const body = await readJsonBody(req);
       const imageBase64 = body?.imageBase64;
-      if (!imageBase64) return NextResponse.json({ error: "No image provided" }, { status: 400 });
-
+      if (!imageBase64) {
+        const res = NextResponse.json(
+          { error: "No image provided", code: "NO_IMAGE_BASE64" },
+          { status: 400 }
+        );
+        return withAnonCookie(res, shouldSetAnonCookie, anonId);
+      }
       imageForOpenAI = String(imageBase64);
+    } else {
+      const res = NextResponse.json(
+        { error: "Unsupported Content-Type", code: "UNSUPPORTED_CONTENT_TYPE", contentType },
+        { status: 400 }
+      );
+      return withAnonCookie(res, shouldSetAnonCookie, anonId);
     }
 
     // =========================
@@ -360,13 +373,17 @@ alternatives rule:
 
     const data = await response.json();
     const content = data?.choices?.[0]?.message?.content;
-    if (!content) return NextResponse.json({ error: "Invalid AI response" }, { status: 500 });
+    if (!content) {
+      const res = NextResponse.json({ error: "Invalid AI response" }, { status: 500 });
+      return withAnonCookie(res, shouldSetAnonCookie, anonId);
+    }
 
     let aiResult: AIResult;
     try {
       aiResult = normalizeAI(safeJsonParse(content));
     } catch {
-      return NextResponse.json({ error: "AI failed to analyze" }, { status: 500 });
+      const res = NextResponse.json({ error: "AI failed to analyze" }, { status: 500 });
+      return withAnonCookie(res, shouldSetAnonCookie, anonId);
     }
 
     // =========================
@@ -423,22 +440,15 @@ alternatives rule:
       };
     }
 
-    const res = NextResponse.json({ id: saved?.id ? String(saved.id) : null, scan: saved });
+    const res = NextResponse.json({
+      id: saved?.id ? String(saved.id) : null,
+      scan: saved,
+    });
 
-    // ✅ set-cookie：只要本次生成了 anonId，就写回去
-    if (shouldSetAnonCookie && anonId) {
-      res.cookies.set("gp_anon", anonId, {
-        path: "/",
-        httpOnly: true,
-        sameSite: "lax",
-        secure: true,
-        maxAge: 60 * 60 * 24 * 365,
-      });
-    }
-
-    return res;
+    return withAnonCookie(res, shouldSetAnonCookie, anonId);
   } catch (error: any) {
     console.error("Analyze API Error:", error);
-    return NextResponse.json({ error: error.message ?? "Server error" }, { status: 500 });
+    const res = NextResponse.json({ error: error.message ?? "Server error" }, { status: 500 });
+    return res;
   }
 }
