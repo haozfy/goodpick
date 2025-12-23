@@ -7,8 +7,6 @@ import { ArrowLeft, ChevronRight, Sparkles, ShieldCheck, Ban, TriangleAlert } fr
 type Verdict = "good" | "caution" | "avoid";
 type RecItem = { name: string; reason: string; price?: string };
 
-const LAST_SCAN_KEY = "goodpick_last_scan_id";
-
 export default function RecsClient() {
   const router = useRouter();
   const params = useSearchParams();
@@ -24,26 +22,41 @@ export default function RecsClient() {
   const [items, setItems] = useState<RecItem[]>([]);
   const [error, setError] = useState<string>("");
 
-  // ✅ 核心：URL 没 scanId 就用最近一次
+  // ✅ 如果 URL 没 scanId，就去后端拿“最新一次扫描”
   useEffect(() => {
     if (scanIdFromUrl) {
       setScanId(scanIdFromUrl);
-      // 同步刷新 last id（用户从结果页点过来时也会更新）
-      try { localStorage.setItem(LAST_SCAN_KEY, scanIdFromUrl); } catch {}
       return;
     }
-    try {
-      const last = localStorage.getItem(LAST_SCAN_KEY);
-      if (last) setScanId(last);
-    } catch {}
+
+    (async () => {
+      try {
+        setLoading(true);
+        setError("");
+
+        const res = await fetch("/api/last-scan", { cache: "no-store" });
+        const data = await res.json();
+
+        if (!res.ok) {
+          // 404 = 没扫过；401 = 没登录
+          setScanId(null);
+          setError(data?.error || "No scans yet.");
+          return;
+        }
+
+        setScanId(data.scan.id);
+      } catch (e: any) {
+        setScanId(null);
+        setError(e?.message || "Failed to load your latest scan.");
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [scanIdFromUrl]);
 
-  // ✅ 拉取推荐
+  // ✅ 有 scanId 后，再拉推荐
   useEffect(() => {
-    if (!scanId) {
-      setLoading(false);
-      return;
-    }
+    if (!scanId) return;
 
     (async () => {
       try {
@@ -53,7 +66,7 @@ export default function RecsClient() {
         const res = await fetch(`/api/recs?scanId=${scanId}`, { cache: "no-store" });
         const data = await res.json();
 
-        if (!res.ok) throw new Error(data?.error || "Failed to load recommendations.");
+        if (!res.ok) throw new Error(data?.error || "Failed to load recs.");
 
         setVerdict((data.verdict as Verdict) || "good");
         setAnalysis(data.analysis || "");
@@ -61,7 +74,7 @@ export default function RecsClient() {
         setScore(typeof data.score === "number" ? data.score : null);
         setItems(Array.isArray(data.alternatives) ? data.alternatives : []);
       } catch (e: any) {
-        setError(e?.message || "Network error");
+        setError(e?.message || "Failed to load recommendations.");
       } finally {
         setLoading(false);
       }
@@ -69,34 +82,40 @@ export default function RecsClient() {
   }, [scanId]);
 
   const header = useMemo(() => {
-    if (verdict === "avoid") return { title: "Skip it. Swap once to improve fast." };
-    if (verdict === "caution") return { title: "Not ideal. A cleaner swap makes it solid." };
-    return { title: "Good choice 👍" };
+    if (verdict === "avoid") return "Skip it. Swap once to improve fast.";
+    if (verdict === "caution") return "Not ideal. A cleaner swap makes it solid.";
+    return "Good choice 👍";
   }, [verdict]);
 
   if (loading) {
     return (
       <Shell>
-        <Card><div className="text-sm text-neutral-500">Loading recommendations…</div></Card>
+        <Card>
+          <div className="text-sm text-neutral-500">Loading recommendations…</div>
+        </Card>
       </Shell>
     );
   }
 
-  // ✅ 如果完全没有 scanId（也没有 last id）
+  // ✅ 没扫过 / 没登录 / last-scan 失败
   if (!scanId) {
     return (
       <Shell>
-        <Title title="Recommendations" sub="Scan a product first — then you’ll get swaps here." />
+        <Title title="Recommendations" sub={error || "Scan a product first — then you’ll get swaps here."} />
         <Primary onClick={() => router.push("/")}>Go scan</Primary>
       </Shell>
     );
   }
 
+  // ✅ 拉取 recs 出错
   if (error) {
     return (
       <Shell>
         <Title title="Recommendations" sub="Couldn’t load this scan." />
-        <Card><div className="text-sm text-rose-600">{error}</div></Card>
+        <Card>
+          <div className="text-sm text-rose-600">{error}</div>
+          <div className="mt-2 text-xs text-neutral-500">scanId: {scanId}</div>
+        </Card>
         <Row>
           <Ghost onClick={() => router.back()}><ArrowLeft size={14}/> Back</Ghost>
           <Primary onClick={() => router.push("/")}>Scan another <ChevronRight size={14}/></Primary>
@@ -105,7 +124,6 @@ export default function RecsClient() {
     );
   }
 
-  // ✅ 如果 good，就给一个“继续扫描”的干净页面
   if (verdict === "good") {
     return (
       <Shell>
@@ -120,7 +138,6 @@ export default function RecsClient() {
 
   return (
     <Shell>
-      {/* 顶部结论卡 */}
       <div className="relative overflow-hidden rounded-[28px] bg-neutral-900 p-6 text-white shadow-lg">
         <div className="relative z-10">
           <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-black">
@@ -128,13 +145,11 @@ export default function RecsClient() {
             Smart swaps
           </div>
 
-          <div className="mt-4 text-2xl font-black leading-tight">{header.title}</div>
+          <div className="mt-4 text-2xl font-black leading-tight">{header}</div>
 
           <div className="mt-2 flex items-center gap-2">
             <Pill verdict={verdict} />
-            {score !== null ? (
-              <span className="text-xs text-white/70">Score {score}</span>
-            ) : null}
+            {score !== null ? <span className="text-xs text-white/70">Score {score}</span> : null}
           </div>
 
           <div className="mt-3 text-sm text-white/85">
@@ -147,15 +162,11 @@ export default function RecsClient() {
         <div className="absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-teal-400/10 blur-3xl" />
       </div>
 
-      {/* 推荐列表（2-3 个） */}
       <div className="mt-6">
         <div className="text-sm font-black text-neutral-900">Cleaner alternatives</div>
         <div className="mt-3 space-y-4">
           {(items.length ? items : fallbackRecs(verdict)).slice(0, 3).map((it, idx) => (
-            <div
-              key={idx}
-              className="w-full rounded-[24px] bg-white p-5 shadow-sm ring-1 ring-neutral-100"
-            >
+            <div key={idx} className="rounded-[24px] bg-white p-5 shadow-sm ring-1 ring-neutral-100">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="font-black text-neutral-900 truncate">{it.name}</div>
@@ -172,13 +183,6 @@ export default function RecsClient() {
                   </span>
                 ) : null}
               </div>
-
-              <button
-                onClick={() => router.push("/")}
-                className="mt-4 inline-flex items-center gap-1 text-sm font-black text-emerald-600"
-              >
-                Scan another <ChevronRight size={16} />
-              </button>
             </div>
           ))}
         </div>
@@ -218,11 +222,9 @@ function Title({ title, sub }: { title: string; sub?: string }) {
 function Card({ children }: { children: React.ReactNode }) {
   return <div className="mt-6 rounded-[24px] bg-white p-5 shadow-sm ring-1 ring-neutral-100">{children}</div>;
 }
-
 function Row({ children }: { children: React.ReactNode }) {
   return <div className="mt-8 flex justify-between">{children}</div>;
 }
-
 function Primary({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
   return (
     <button
@@ -233,7 +235,6 @@ function Primary({ children, onClick }: { children: React.ReactNode; onClick: ()
     </button>
   );
 }
-
 function Ghost({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
   return (
     <button
