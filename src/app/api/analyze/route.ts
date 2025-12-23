@@ -32,8 +32,8 @@ type AIResult = {
   alternatives: Alternative[];
 };
 
-const FREE_LIMIT = 5; // ✅ 登录免费 5 次
-const ANON_LIMIT = 5; // ✅ 未登录也免费 5 次
+// ✅ 统一：不付费之前，无论是否登录，都免费 3 次
+const TRIAL_LIMIT = 3;
 
 const ALLOWED_TAGS = new Set([
   "added_sugar",
@@ -84,19 +84,39 @@ function normalizeAlternative(a: any): Alternative {
   const price = (["$", "$$", "$$$"].includes(a?.price) ? a.price : "$$") as "$" | "$$" | "$$$";
 
   const sodium_mg =
-    a?.sodium_mg === null ? null : Number.isFinite(Number(a?.sodium_mg)) ? clampInt(a.sodium_mg, 0, 5000) : undefined;
+    a?.sodium_mg === null
+      ? null
+      : Number.isFinite(Number(a?.sodium_mg))
+        ? clampInt(a.sodium_mg, 0, 5000)
+        : undefined;
 
   const added_sugar_g =
-    a?.added_sugar_g === null ? null : Number.isFinite(Number(a?.added_sugar_g)) ? clampNum(a.added_sugar_g, 0, 200) : undefined;
+    a?.added_sugar_g === null
+      ? null
+      : Number.isFinite(Number(a?.added_sugar_g))
+        ? clampNum(a.added_sugar_g, 0, 200)
+        : undefined;
 
   const cholesterol_mg =
-    a?.cholesterol_mg === null ? null : Number.isFinite(Number(a?.cholesterol_mg)) ? clampInt(a.cholesterol_mg, 0, 2000) : undefined;
+    a?.cholesterol_mg === null
+      ? null
+      : Number.isFinite(Number(a?.cholesterol_mg))
+        ? clampInt(a.cholesterol_mg, 0, 2000)
+        : undefined;
 
   const ingredient_count =
-    a?.ingredient_count === null ? null : Number.isFinite(Number(a?.ingredient_count)) ? clampInt(a.ingredient_count, 0, 200) : undefined;
+    a?.ingredient_count === null
+      ? null
+      : Number.isFinite(Number(a?.ingredient_count))
+        ? clampInt(a.ingredient_count, 0, 200)
+        : undefined;
 
   const has_sweeteners =
-    typeof a?.has_sweeteners === "boolean" ? a.has_sweeteners : a?.has_sweeteners === null ? null : undefined;
+    typeof a?.has_sweeteners === "boolean"
+      ? a.has_sweeteners
+      : a?.has_sweeteners === null
+        ? null
+        : undefined;
 
   return { name, reason, price, sodium_mg, added_sugar_g, cholesterol_mg, ingredient_count, has_sweeteners };
 }
@@ -144,8 +164,12 @@ function prefsToPrompt(p: Prefs) {
 }
 
 function genAnonId() {
-  // Node 18+ supports crypto.randomUUID()
   return crypto.randomUUID();
+}
+
+function getAnonIdFromCookie(cookieHeader: string) {
+  const match = cookieHeader.match(/(?:^|;\s*)gp_anon=([^;]+)/);
+  return match?.[1] ? decodeURIComponent(match[1]) : null;
 }
 
 export async function POST(req: Request) {
@@ -154,20 +178,21 @@ export async function POST(req: Request) {
     if (!imageBase64) return NextResponse.json({ error: "No image provided" }, { status: 400 });
 
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-    // ✅ 未登录：用 anon_id（cookie）
-    // 从 cookie 取 anon_id；没有就生成一个，并在响应里 set-cookie
+    // ✅ 无论是否登录，都确保有 anon_id（cookie）用于统一免费计数
     const cookieHeader = req.headers.get("cookie") || "";
-    const match = cookieHeader.match(/(?:^|;\s*)gp_anon=([^;]+)/);
-    let anonId = match?.[1] ? decodeURIComponent(match[1]) : null;
+    let anonId = getAnonIdFromCookie(cookieHeader);
     let shouldSetAnonCookie = false;
-    if (!user && !anonId) {
+
+    if (!anonId) {
       anonId = genAnonId();
       shouldSetAnonCookie = true;
     }
 
-    // 0) 读偏好：登录用户从 user_preferences；未登录用默认（或你也可以做 anon_prefs 表，先别搞复杂）
+    // 0) 偏好：登录用户从 user_preferences；未登录默认
     let prefs: Prefs = { ...DEFAULT_PREFS };
     if (user) {
       const { data: prefRow } = await supabase
@@ -179,48 +204,37 @@ export async function POST(req: Request) {
       prefs = { ...DEFAULT_PREFS, ...(prefRow || {}) };
     }
 
-    // 1) 登录用户才看 profiles.is_pro
+    // 1) 是否 Pro（登录才有）
     let isPro = false;
     if (user) {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("is_pro")
-        .eq("id", user.id)
-        .single();
+      const { data: profile } = await supabase.from("profiles").select("is_pro").eq("id", user.id).single();
       isPro = !!profile?.is_pro;
     }
 
-    // 2) 配额
-    if (user) {
-      // 登录：免费 5 次，Pro 不限
-      if (!isPro) {
-        const { count, error: countError } = await supabase
-          .from("scans")
-          .select("*", { count: "exact", head: true })
-          .eq("user_id", user.id);
-
-        if (countError) throw new Error("Failed to check quota");
-        if (count !== null && count >= FREE_LIMIT) {
-          return NextResponse.json({ error: "Free limit reached", code: "LIMIT_REACHED" }, { status: 403 });
-        }
-      }
-    } else {
-      // 未登录：按 anon_scans 计数（免费 5 次）
-      if (!anonId) return NextResponse.json({ error: "Anonymous id missing" }, { status: 500 });
-
+    // 2) 配额：非 Pro（包括未登录）统一按 anon_scans 计数，达到 3 次就挡住
+    if (!isPro) {
       const { count, error: countError } = await supabase
         .from("anon_scans")
         .select("*", { count: "exact", head: true })
         .eq("anon_id", anonId);
 
-      if (countError) throw new Error("Failed to check anon quota");
-      if (count !== null && count >= ANON_LIMIT) {
+      if (countError) throw new Error("Failed to check quota");
+
+      if (count !== null && count >= TRIAL_LIMIT) {
         const res = NextResponse.json(
-          { error: "Free limit reached", code: "ANON_LIMIT_REACHED" },
+          { error: "Free limit reached", code: "LIMIT_REACHED" },
           { status: 403 }
         );
+
+        // ✅ 无论是否登录，只要这次生成了 anonId，都要 set-cookie
         if (shouldSetAnonCookie && anonId) {
-          res.cookies.set("gp_anon", anonId, { path: "/", httpOnly: true, sameSite: "lax", secure: true, maxAge: 60 * 60 * 24 * 365 });
+          res.cookies.set("gp_anon", anonId, {
+            path: "/",
+            httpOnly: true,
+            sameSite: "lax",
+            secure: true,
+            maxAge: 60 * 60 * 24 * 365,
+          });
         }
         return res;
       }
@@ -314,9 +328,27 @@ alternatives rule:
       return NextResponse.json({ error: "AI failed to analyze" }, { status: 500 });
     }
 
-    // 4) 写入：登录写 scans；未登录写 anon_scans
+    // 4) 写入：非 Pro 时写 anon_scans 用于统一计数；登录用户另外写 scans 作为账号历史
     let saved: any = null;
 
+    // ✅ 4.1 非 Pro：写入 anon_scans（计数真源）
+    // Pro 不限，为了省库写入可跳过（你也可以保留写入，随你）
+    if (!isPro) {
+      const { error: anonErr } = await supabase.from("anon_scans").insert({
+        anon_id: anonId,
+        product_name: aiResult.product_name,
+        score: aiResult.score,
+        verdict: aiResult.verdict,
+        analysis: aiResult.analysis,
+        risk_tags: aiResult.risk_tags,
+        triggers: aiResult.triggers,
+        alternatives: aiResult.alternatives,
+      });
+
+      if (anonErr) throw new Error(anonErr.message);
+    }
+
+    // ✅ 4.2 登录用户：写入 scans（你的原逻辑保留）
     if (user) {
       const { data: scanData, error: dbError } = await supabase
         .from("scans")
@@ -338,32 +370,28 @@ alternatives rule:
       if (dbError) throw new Error(dbError.message);
       saved = scanData;
     } else {
-      if (!anonId) throw new Error("Anonymous id missing");
-
-      const { data: scanData, error: dbError } = await supabase
-        .from("anon_scans")
-        .insert({
-          anon_id: anonId,
-          product_name: aiResult.product_name,
-          score: aiResult.score,
-          verdict: aiResult.verdict,
-          analysis: aiResult.analysis,
-          risk_tags: aiResult.risk_tags,
-          triggers: aiResult.triggers,
-          alternatives: aiResult.alternatives,
-        })
-        .select("id, created_at, product_name, score, verdict, analysis, risk_tags, triggers, alternatives")
-        .single();
-
-      if (dbError) throw new Error(dbError.message);
-      // 给前端一个统一的 id（anon_scans 是 bigint，这里也没问题）
-      saved = scanData;
+      // 未登录：给前端一个“看起来一致”的返回结构（用 anon_scans 最近一条也行）
+      // 这里最小做法：直接返回 aiResult，不强依赖 anon_scans 的 id
+      saved = {
+        id: null,
+        created_at: new Date().toISOString(),
+        product_name: aiResult.product_name,
+        score: aiResult.score,
+        verdict: aiResult.verdict,
+        analysis: aiResult.analysis,
+        risk_tags: aiResult.risk_tags,
+        triggers: aiResult.triggers,
+        alternatives: aiResult.alternatives,
+      };
     }
 
-    const res = NextResponse.json({ id: String(saved.id), scan: saved });
+    const res = NextResponse.json({
+      id: saved?.id ? String(saved.id) : null,
+      scan: saved,
+    });
 
-    // ✅ 未登录且刚生成 anonId：写 cookie
-    if (!user && shouldSetAnonCookie && anonId) {
+    // ✅ set-cookie：无论是否登录，只要本次生成了 anonId，就写回去
+    if (shouldSetAnonCookie && anonId) {
       res.cookies.set("gp_anon", anonId, {
         path: "/",
         httpOnly: true,
