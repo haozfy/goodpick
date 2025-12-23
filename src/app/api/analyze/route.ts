@@ -172,6 +172,20 @@ function getAnonIdFromCookie(cookieHeader: string) {
   return match?.[1] ? decodeURIComponent(match[1]) : null;
 }
 
+/**
+ * ✅ 只修未登录：把裸 base64 变成合法 data url（Safari 需要）
+ * - 已经是 data:image/... 的：不动
+ * - base64,xxxx 的：补 data:image/jpeg;
+ * - 其他默认当 jpeg：data:image/jpeg;base64,xxxx
+ */
+function normalizeDataImageUrlForAnon(input: string) {
+  const s = String(input || "").trim();
+  if (!s) return s;
+  if (s.startsWith("data:image/")) return s;
+  if (s.startsWith("base64,")) return `data:image/jpeg;${s}`;
+  return `data:image/jpeg;base64,${s}`;
+}
+
 export async function POST(req: Request) {
   try {
     const { imageBase64 } = await req.json();
@@ -221,12 +235,8 @@ export async function POST(req: Request) {
       if (countError) throw new Error("Failed to check quota");
 
       if (count !== null && count >= TRIAL_LIMIT) {
-        const res = NextResponse.json(
-          { error: "Free limit reached", code: "LIMIT_REACHED" },
-          { status: 403 }
-        );
+        const res = NextResponse.json({ error: "Free limit reached", code: "LIMIT_REACHED" }, { status: 403 });
 
-        // ✅ 无论是否登录，只要这次生成了 anonId，都要 set-cookie
         if (shouldSetAnonCookie && anonId) {
           res.cookies.set("gp_anon", anonId, {
             path: "/",
@@ -239,6 +249,9 @@ export async function POST(req: Request) {
         return res;
       }
     }
+
+    // ✅ 关键：只修未登录的 image_url（登录逻辑保持原样）
+    const imageForOpenAI = user ? imageBase64 : normalizeDataImageUrlForAnon(imageBase64);
 
     // 3) OpenAI
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -308,7 +321,7 @@ alternatives rule:
             role: "user",
             content: [
               { type: "text", text: "Analyze this food label/product. Extract numbers if visible." },
-              { type: "image_url", image_url: { url: imageBase64 } },
+              { type: "image_url", image_url: { url: imageForOpenAI } },
             ],
           },
         ],
@@ -332,7 +345,6 @@ alternatives rule:
     let saved: any = null;
 
     // ✅ 4.1 非 Pro：写入 anon_scans（计数真源）
-    // Pro 不限，为了省库写入可跳过（你也可以保留写入，随你）
     if (!isPro) {
       const { error: anonErr } = await supabase.from("anon_scans").insert({
         anon_id: anonId,
@@ -348,7 +360,7 @@ alternatives rule:
       if (anonErr) throw new Error(anonErr.message);
     }
 
-    // ✅ 4.2 登录用户：写入 scans（你的原逻辑保留）
+    // ✅ 4.2 登录用户：写入 scans（保留你的原逻辑）
     if (user) {
       const { data: scanData, error: dbError } = await supabase
         .from("scans")
@@ -370,8 +382,7 @@ alternatives rule:
       if (dbError) throw new Error(dbError.message);
       saved = scanData;
     } else {
-      // 未登录：给前端一个“看起来一致”的返回结构（用 anon_scans 最近一条也行）
-      // 这里最小做法：直接返回 aiResult，不强依赖 anon_scans 的 id
+      // 未登录：返回一个一致结构，不暴露剩余次数
       saved = {
         id: null,
         created_at: new Date().toISOString(),
