@@ -1,6 +1,4 @@
-// app/api/analyze/route.ts
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 
 type Verdict = "good" | "caution" | "avoid";
@@ -34,8 +32,8 @@ type AIResult = {
   alternatives: Alternative[];
 };
 
-const LOGGED_IN_FREE_LIMIT = 5; // 你要的：登录免费 5 次（非 Pro）
-const ANON_FREE_LIMIT = 5;      // 未登录免费 5 次
+const FREE_LIMIT = 5; // ✅ 登录免费 5 次
+const ANON_LIMIT = 5; // ✅ 未登录也免费 5 次
 
 const ALLOWED_TAGS = new Set([
   "added_sugar",
@@ -82,34 +80,25 @@ function safeJsonParse(content: string) {
 
 function normalizeAlternative(a: any): Alternative {
   const name = String(a?.name ?? "").trim().slice(0, 80);
-  const reason = String(a?.reason ?? "").trim().slice(0, 140);
+  const reason = String(a?.reason ?? "").trim().slice(0, 120);
   const price = (["$", "$$", "$$$"].includes(a?.price) ? a.price : "$$") as "$" | "$$" | "$$$";
 
   const sodium_mg =
-    a?.sodium_mg === null ? null : Number.isFinite(Number(a?.sodium_mg)) ? clampInt(a.sodium_mg, 0, 5000) : null;
+    a?.sodium_mg === null ? null : Number.isFinite(Number(a?.sodium_mg)) ? clampInt(a.sodium_mg, 0, 5000) : undefined;
 
   const added_sugar_g =
-    a?.added_sugar_g === null ? null : Number.isFinite(Number(a?.added_sugar_g)) ? clampNum(a.added_sugar_g, 0, 200) : null;
+    a?.added_sugar_g === null ? null : Number.isFinite(Number(a?.added_sugar_g)) ? clampNum(a.added_sugar_g, 0, 200) : undefined;
 
   const cholesterol_mg =
-    a?.cholesterol_mg === null ? null : Number.isFinite(Number(a?.cholesterol_mg)) ? clampInt(a.cholesterol_mg, 0, 2000) : null;
+    a?.cholesterol_mg === null ? null : Number.isFinite(Number(a?.cholesterol_mg)) ? clampInt(a.cholesterol_mg, 0, 2000) : undefined;
 
   const ingredient_count =
-    a?.ingredient_count === null ? null : Number.isFinite(Number(a?.ingredient_count)) ? clampInt(a.ingredient_count, 0, 200) : null;
+    a?.ingredient_count === null ? null : Number.isFinite(Number(a?.ingredient_count)) ? clampInt(a.ingredient_count, 0, 200) : undefined;
 
   const has_sweeteners =
-    typeof a?.has_sweeteners === "boolean" ? a.has_sweeteners : null;
+    typeof a?.has_sweeteners === "boolean" ? a.has_sweeteners : a?.has_sweeteners === null ? null : undefined;
 
-  return {
-    name,
-    reason,
-    price,
-    sodium_mg,
-    added_sugar_g,
-    cholesterol_mg,
-    ingredient_count,
-    has_sweeteners,
-  };
+  return { name, reason, price, sodium_mg, added_sugar_g, cholesterol_mg, ingredient_count, has_sweeteners };
 }
 
 function normalizeAI(raw: any): AIResult {
@@ -120,7 +109,7 @@ function normalizeAI(raw: any): AIResult {
   const verdict: Verdict =
     vRaw === "good" || vRaw === "caution" || vRaw === "avoid" ? vRaw : verdictFromScore(score);
 
-  const analysis = String(raw?.analysis ?? "").trim().slice(0, 160);
+  const analysis = String(raw?.analysis ?? "").trim().slice(0, 120);
 
   const risk_tags = Array.isArray(raw?.risk_tags)
     ? raw.risk_tags
@@ -130,7 +119,7 @@ function normalizeAI(raw: any): AIResult {
     : [];
 
   const triggers = Array.isArray(raw?.triggers)
-    ? raw.triggers.map((x: any) => String(x).trim().slice(0, 90)).filter(Boolean).slice(0, 3)
+    ? raw.triggers.map((x: any) => String(x).trim().slice(0, 80)).filter(Boolean).slice(0, 3)
     : [];
 
   let alternatives: Alternative[] = [];
@@ -140,9 +129,6 @@ function normalizeAI(raw: any): AIResult {
       .map(normalizeAlternative)
       .filter((a: Alternative) => a.name.length > 0);
   }
-
-  // good => alternatives 必须空
-  if (verdict === "good") alternatives = [];
 
   return { product_name, score, verdict, risk_tags, analysis, triggers, alternatives };
 }
@@ -157,41 +143,31 @@ function prefsToPrompt(p: Prefs) {
   return on.length ? on.join(", ") : "none";
 }
 
-function getOrSetAnonId() {
-  const jar = cookies();
-  const key = "gp_anon";
-  const existing = jar.get(key)?.value;
-
-  if (existing) return existing;
-
-  const anonId =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-
-  jar.set(key, anonId, {
-    path: "/",
-    httpOnly: true,
-    sameSite: "lax",
-    // ✅ 本地测试不能 secure:true，否则 cookie 根本写不进去
-    secure: process.env.NODE_ENV === "production",
-    maxAge: 60 * 60 * 24 * 365,
-  });
-
-  return anonId;
+function genAnonId() {
+  // Node 18+ supports crypto.randomUUID()
+  return crypto.randomUUID();
 }
 
 export async function POST(req: Request) {
   try {
     const { imageBase64 } = await req.json();
-    if (!imageBase64) {
-      return NextResponse.json({ error: "No image provided" }, { status: 400 });
-    }
+    if (!imageBase64) return NextResponse.json({ error: "No image provided" }, { status: 400 });
 
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
-    // ✅ 0) prefs：只有登录用户才读（匿名就默认）
+    // ✅ 未登录：用 anon_id（cookie）
+    // 从 cookie 取 anon_id；没有就生成一个，并在响应里 set-cookie
+    const cookieHeader = req.headers.get("cookie") || "";
+    const match = cookieHeader.match(/(?:^|;\s*)gp_anon=([^;]+)/);
+    let anonId = match?.[1] ? decodeURIComponent(match[1]) : null;
+    let shouldSetAnonCookie = false;
+    if (!user && !anonId) {
+      anonId = genAnonId();
+      shouldSetAnonCookie = true;
+    }
+
+    // 0) 读偏好：登录用户从 user_preferences；未登录用默认（或你也可以做 anon_prefs 表，先别搞复杂）
     let prefs: Prefs = { ...DEFAULT_PREFS };
     if (user) {
       const { data: prefRow } = await supabase
@@ -203,9 +179,8 @@ export async function POST(req: Request) {
       prefs = { ...DEFAULT_PREFS, ...(prefRow || {}) };
     }
 
-    // ✅ 1) 配额逻辑：分登录 / 匿名
+    // 1) 登录用户才看 profiles.is_pro
     let isPro = false;
-
     if (user) {
       const { data: profile } = await supabase
         .from("profiles")
@@ -213,7 +188,11 @@ export async function POST(req: Request) {
         .eq("id", user.id)
         .single();
       isPro = !!profile?.is_pro;
+    }
 
+    // 2) 配额
+    if (user) {
+      // 登录：免费 5 次，Pro 不限
       if (!isPro) {
         const { count, error: countError } = await supabase
           .from("scans")
@@ -221,15 +200,13 @@ export async function POST(req: Request) {
           .eq("user_id", user.id);
 
         if (countError) throw new Error("Failed to check quota");
-        if (count !== null && count >= LOGGED_IN_FREE_LIMIT) {
-          return NextResponse.json(
-            { error: "Free limit reached", code: "LIMIT_REACHED" },
-            { status: 403 }
-          );
+        if (count !== null && count >= FREE_LIMIT) {
+          return NextResponse.json({ error: "Free limit reached", code: "LIMIT_REACHED" }, { status: 403 });
         }
       }
     } else {
-      const anonId = getOrSetAnonId();
+      // 未登录：按 anon_scans 计数（免费 5 次）
+      if (!anonId) return NextResponse.json({ error: "Anonymous id missing" }, { status: 500 });
 
       const { count, error: countError } = await supabase
         .from("anon_scans")
@@ -237,15 +214,19 @@ export async function POST(req: Request) {
         .eq("anon_id", anonId);
 
       if (countError) throw new Error("Failed to check anon quota");
-      if (count !== null && count >= ANON_FREE_LIMIT) {
-        return NextResponse.json(
-          { error: "Anon free limit reached", code: "ANON_LIMIT_REACHED" },
+      if (count !== null && count >= ANON_LIMIT) {
+        const res = NextResponse.json(
+          { error: "Free limit reached", code: "ANON_LIMIT_REACHED" },
           { status: 403 }
         );
+        if (shouldSetAnonCookie && anonId) {
+          res.cookies.set("gp_anon", anonId, { path: "/", httpOnly: true, sameSite: "lax", secure: true, maxAge: 60 * 60 * 24 * 365 });
+        }
+        return res;
       }
     }
 
-    // ✅ 2) OpenAI 分析（保持你原标准）
+    // 3) OpenAI
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -253,9 +234,7 @@ export async function POST(req: Request) {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
-        temperature: 0.2,
-        max_tokens: 650,
+        model: "gpt-4o",
         messages: [
           {
             role: "system",
@@ -303,11 +282,13 @@ Verdict mapping:
 risk_tags must be from this fixed set only:
 ["added_sugar","high_sodium","refined_oils","refined_carbs","many_additives","ultra_processed","low_fiber","low_protein","sweeteners","high_cholesterol","simple_ingredients"]
 
-analysis: short, punchy.
-triggers: 1-3 verifiable bullets (numbers if visible).
-alternatives:
-- if verdict good => []
-- else 2-3 cleaner realistic swaps (same category), meta fields null if unknown.`,
+analysis must be punchy, user-friendly, max 15 words.
+triggers must be verifiable (numbers if visible).
+
+alternatives rule:
+- If verdict is "good", alternatives must be []
+- Otherwise provide 2-3 realistic cleaner alternatives (same category).
+- Fill meta fields when you can infer; otherwise set them to null.`,
           },
           {
             role: "user",
@@ -317,6 +298,8 @@ alternatives:
             ],
           },
         ],
+        max_tokens: 650,
+        temperature: 0.2,
       }),
     });
 
@@ -331,7 +314,9 @@ alternatives:
       return NextResponse.json({ error: "AI failed to analyze" }, { status: 500 });
     }
 
-    // ✅ 3) 写入：登录写 scans；匿名写 anon_scans
+    // 4) 写入：登录写 scans；未登录写 anon_scans
+    let saved: any = null;
+
     if (user) {
       const { data: scanData, error: dbError } = await supabase
         .from("scans")
@@ -347,15 +332,15 @@ alternatives:
           triggers: aiResult.triggers,
           alternatives: aiResult.alternatives,
         })
-        .select("id")
+        .select("id, created_at, product_name, score, verdict, analysis, risk_tags, triggers, alternatives")
         .single();
 
       if (dbError) throw new Error(dbError.message);
-      return NextResponse.json({ id: scanData.id, mode: "user" });
+      saved = scanData;
     } else {
-      const anonId = getOrSetAnonId();
+      if (!anonId) throw new Error("Anonymous id missing");
 
-      const { data: row, error: dbError } = await supabase
+      const { data: scanData, error: dbError } = await supabase
         .from("anon_scans")
         .insert({
           anon_id: anonId,
@@ -367,14 +352,28 @@ alternatives:
           triggers: aiResult.triggers,
           alternatives: aiResult.alternatives,
         })
-        .select("id")
+        .select("id, created_at, product_name, score, verdict, analysis, risk_tags, triggers, alternatives")
         .single();
 
       if (dbError) throw new Error(dbError.message);
-
-      // ✅ 匿名也返回一个 id，前端照样跳转结果页
-      return NextResponse.json({ id: row.id, mode: "anon" });
+      // 给前端一个统一的 id（anon_scans 是 bigint，这里也没问题）
+      saved = scanData;
     }
+
+    const res = NextResponse.json({ id: String(saved.id), scan: saved });
+
+    // ✅ 未登录且刚生成 anonId：写 cookie
+    if (!user && shouldSetAnonCookie && anonId) {
+      res.cookies.set("gp_anon", anonId, {
+        path: "/",
+        httpOnly: true,
+        sameSite: "lax",
+        secure: true,
+        maxAge: 60 * 60 * 24 * 365,
+      });
+    }
+
+    return res;
   } catch (error: any) {
     console.error("Analyze API Error:", error);
     return NextResponse.json({ error: error.message ?? "Server error" }, { status: 500 });
