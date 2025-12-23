@@ -7,10 +7,14 @@ import { ArrowLeft, ChevronRight, Sparkles, ShieldCheck, Ban, TriangleAlert } fr
 type Verdict = "good" | "caution" | "avoid";
 type RecItem = { name: string; reason: string; price?: string };
 
+const LAST_SCAN_KEY = "goodpick_last_scan_id";
+
 export default function RecsClient() {
   const router = useRouter();
   const params = useSearchParams();
-  const scanId = params.get("scanId") || params.get("scan");
+
+  const scanIdFromUrl = params.get("scanId") || params.get("scan");
+  const [scanId, setScanId] = useState<string | null>(scanIdFromUrl);
 
   const [loading, setLoading] = useState(true);
   const [verdict, setVerdict] = useState<Verdict>("good");
@@ -20,22 +24,44 @@ export default function RecsClient() {
   const [items, setItems] = useState<RecItem[]>([]);
   const [error, setError] = useState<string>("");
 
+  // ✅ 核心：URL 没 scanId 就用最近一次
   useEffect(() => {
-    if (!scanId) { setLoading(false); return; }
+    if (scanIdFromUrl) {
+      setScanId(scanIdFromUrl);
+      // 同步刷新 last id（用户从结果页点过来时也会更新）
+      try { localStorage.setItem(LAST_SCAN_KEY, scanIdFromUrl); } catch {}
+      return;
+    }
+    try {
+      const last = localStorage.getItem(LAST_SCAN_KEY);
+      if (last) setScanId(last);
+    } catch {}
+  }, [scanIdFromUrl]);
+
+  // ✅ 拉取推荐
+  useEffect(() => {
+    if (!scanId) {
+      setLoading(false);
+      return;
+    }
+
     (async () => {
       try {
         setLoading(true);
+        setError("");
+
         const res = await fetch(`/api/recs?scanId=${scanId}`, { cache: "no-store" });
         const data = await res.json();
-        if (!res.ok) throw new Error(data?.error || "Failed to load recs");
 
-        setVerdict(data.verdict);
+        if (!res.ok) throw new Error(data?.error || "Failed to load recommendations.");
+
+        setVerdict((data.verdict as Verdict) || "good");
         setAnalysis(data.analysis || "");
         setProductName(data.productName || "");
         setScore(typeof data.score === "number" ? data.score : null);
         setItems(Array.isArray(data.alternatives) ? data.alternatives : []);
       } catch (e: any) {
-        setError(e.message || "Network error");
+        setError(e?.message || "Network error");
       } finally {
         setLoading(false);
       }
@@ -43,13 +69,20 @@ export default function RecsClient() {
   }, [scanId]);
 
   const header = useMemo(() => {
-    if (verdict === "avoid") return { title: "Skip it. Swap once to improve fast.", pill: "Avoid" };
-    if (verdict === "caution") return { title: "Not ideal. A cleaner swap makes it solid.", pill: "Caution" };
-    return { title: "Good choice 👍", pill: "Good" };
+    if (verdict === "avoid") return { title: "Skip it. Swap once to improve fast." };
+    if (verdict === "caution") return { title: "Not ideal. A cleaner swap makes it solid." };
+    return { title: "Good choice 👍" };
   }, [verdict]);
 
-  if (loading) return <Shell><Card><div className="text-sm text-neutral-500">Loading…</div></Card></Shell>;
+  if (loading) {
+    return (
+      <Shell>
+        <Card><div className="text-sm text-neutral-500">Loading recommendations…</div></Card>
+      </Shell>
+    );
+  }
 
+  // ✅ 如果完全没有 scanId（也没有 last id）
   if (!scanId) {
     return (
       <Shell>
@@ -72,6 +105,7 @@ export default function RecsClient() {
     );
   }
 
+  // ✅ 如果 good，就给一个“继续扫描”的干净页面
   if (verdict === "good") {
     return (
       <Shell>
@@ -86,7 +120,7 @@ export default function RecsClient() {
 
   return (
     <Shell>
-      {/* 顶部结论卡：更像产品 */}
+      {/* 顶部结论卡 */}
       <div className="relative overflow-hidden rounded-[28px] bg-neutral-900 p-6 text-white shadow-lg">
         <div className="relative z-10">
           <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-black">
@@ -113,15 +147,14 @@ export default function RecsClient() {
         <div className="absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-teal-400/10 blur-3xl" />
       </div>
 
-      {/* 推荐列表：2-3 个，带“Pick”动作 */}
+      {/* 推荐列表（2-3 个） */}
       <div className="mt-6">
         <div className="text-sm font-black text-neutral-900">Cleaner alternatives</div>
         <div className="mt-3 space-y-4">
           {(items.length ? items : fallbackRecs(verdict)).slice(0, 3).map((it, idx) => (
-            <button
+            <div
               key={idx}
-              onClick={() => router.push("/dashboard")}
-              className="w-full text-left rounded-[24px] bg-white p-5 shadow-sm ring-1 ring-neutral-100 hover:ring-emerald-200 transition"
+              className="w-full rounded-[24px] bg-white p-5 shadow-sm ring-1 ring-neutral-100"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -140,10 +173,13 @@ export default function RecsClient() {
                 ) : null}
               </div>
 
-              <div className="mt-4 inline-flex items-center gap-1 text-sm font-black text-emerald-600">
-                Pick this swap <ChevronRight size={16} />
-              </div>
-            </button>
+              <button
+                onClick={() => router.push("/")}
+                className="mt-4 inline-flex items-center gap-1 text-sm font-black text-emerald-600"
+              >
+                Scan another <ChevronRight size={16} />
+              </button>
+            </div>
           ))}
         </div>
 
@@ -156,12 +192,11 @@ export default function RecsClient() {
         <Ghost onClick={() => router.back()}><ArrowLeft size={14}/> Back</Ghost>
         <Primary onClick={() => router.push("/")}>Scan another <ChevronRight size={14}/></Primary>
       </Row>
+
       <div className="h-10" />
     </Shell>
   );
 }
-
-/* -------- small UI helpers -------- */
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
@@ -223,17 +258,16 @@ function Pill({ verdict }: { verdict: Verdict }) {
   );
 }
 
-// 如果模型没给 alternatives，给个“类别替代保底”，避免空白难用
 function fallbackRecs(verdict: Verdict): RecItem[] {
   if (verdict === "avoid") {
     return [
       { name: "Plain Greek yogurt + fruit", reason: "Lower sugar, higher protein, fewer additives.", price: "$$" },
-      { name: "Nuts (unsalted) / nut butter", reason: "Better fats, more satiety, less processed.", price: "$$" },
+      { name: "Unsalted nuts / nut butter", reason: "Better fats, more satiety, less processed.", price: "$$" },
       { name: "Whole-food snack (banana / apple)", reason: "Natural ingredients, predictable impact.", price: "$" },
     ];
   }
   return [
-    { name: "Lower-sugar version (same category)", reason: "Same vibe, less sugar spike.", price: "$" },
+    { name: "Lower-sugar option (same category)", reason: "Same vibe, less sugar spike.", price: "$" },
     { name: "Short ingredient list option", reason: "Fewer additives and flavorings.", price: "$$" },
     { name: "Whole grain / higher fiber pick", reason: "More stable energy and fullness.", price: "$$" },
   ];
