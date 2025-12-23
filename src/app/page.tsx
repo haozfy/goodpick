@@ -1,19 +1,20 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Camera, Loader2, ArrowRight, History } from "lucide-react";
 
 export default function Home() {
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [recentScans, setRecentScans] = useState<any[]>([]);
-  const [isAuthed, setIsAuthed] = useState(false);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const supabase = createClient();
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isAuthed, setIsAuthed] = useState(false);
+  const [recentScans, setRecentScans] = useState<any[]>([]);
 
   useEffect(() => {
     const run = async () => {
@@ -66,9 +67,10 @@ export default function Home() {
 
         const data = await response.json();
 
-        if (response.status === 403 && data.code === "LIMIT_REACHED") {
+        // ✅ 只在用完之后提示登录/付费（不显示剩余次数）
+        if (response.status === 403 && data?.code === "LIMIT_REACHED") {
           const go = confirm(
-            "Free trial completed.\n\nLog in / upgrade to Pro for unlimited photo scans and saved history."
+            "Trial completed.\n\nLog in to save history and unlock unlimited scans."
           );
           if (go) router.push("/login");
           setIsAnalyzing(false);
@@ -78,9 +80,10 @@ export default function Home() {
 
         if (!response.ok) throw new Error(data?.error || "Something went wrong");
 
-        // ✅ 登录有 id → scan-result；未登录无 id → 你应改成 /result（上次我说的）
-        if (data?.id) router.push(`/scan-result?id=${data.id}`);
-        else {
+        // ✅ 登录有 id -> scan-result；未登录无 id -> /result（你需要有这个页面）
+        if (data?.id) {
+          router.push(`/scan-result?id=${data.id}`);
+        } else {
           sessionStorage.setItem("gp_last_scan", JSON.stringify(data.scan));
           router.push("/result");
         }
@@ -93,29 +96,34 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-neutral-50 px-6 pt-16 pb-10 flex flex-col items-center">
-      {/* Top */}
+    <main className="min-h-screen bg-neutral-50 px-6 pt-14 pb-10 flex flex-col items-center">
+      {/* Subtle glow */}
+      <div className="pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 w-[680px] h-[680px] rounded-full bg-emerald-400/10 blur-3xl -z-10" />
+
+      {/* Header */}
       <div className="w-full max-w-sm text-center">
         <h1 className="text-4xl font-black tracking-tight text-neutral-900">
           Good<span className="text-emerald-600">Pick</span>
         </h1>
 
+        {/* ✅ 健康路线：一句话让人秒懂 */}
         <p className="mt-3 text-base font-semibold text-neutral-800">
-          Take a photo. Get a clear verdict.
+          Make healthier choices.
         </p>
 
-        <p className="mt-1 text-xs text-neutral-400">
-          No signup needed to try.
+        {/* ✅ 功能解释：拍照 → 结论 */}
+        <p className="mt-1 text-xs text-neutral-500">
+          Snap a photo. Get a clear verdict in seconds.
         </p>
       </div>
 
       {/* Hidden input */}
       <input
-        type="file"
         ref={fileInputRef}
-        onChange={handleFileChange}
+        type="file"
         accept="image/*"
         capture="environment"
+        onChange={handleFileChange}
         className="hidden"
       />
 
@@ -141,6 +149,11 @@ export default function Home() {
             </div>
           )}
         </button>
+
+        {/* Micro trust line */}
+        <div className="mt-4 text-center text-xs text-neutral-400">
+          No signup required to try.
+        </div>
       </div>
 
       {/* Bottom */}
