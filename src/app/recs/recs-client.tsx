@@ -14,7 +14,9 @@ export default function RecsClient() {
   const scanIdFromUrl = params.get("scanId") || params.get("scan");
   const [scanId, setScanId] = useState<string | null>(scanIdFromUrl);
 
-  const [loading, setLoading] = useState(true);
+  const [bootLoading, setBootLoading] = useState<boolean>(true); // 找 scanId
+  const [recsLoading, setRecsLoading] = useState<boolean>(false); // 拉 recs
+
   const [verdict, setVerdict] = useState<Verdict>("good");
   const [analysis, setAnalysis] = useState("");
   const [productName, setProductName] = useState("");
@@ -22,51 +24,65 @@ export default function RecsClient() {
   const [items, setItems] = useState<RecItem[]>([]);
   const [error, setError] = useState<string>("");
 
-  // ✅ 如果 URL 没 scanId，就去后端拿“最新一次扫描”
+  // 1) 初始化 scanId：URL 优先，否则取 last-scan
   useEffect(() => {
-    if (scanIdFromUrl) {
-      setScanId(scanIdFromUrl);
-      return;
-    }
+    let cancelled = false;
 
     (async () => {
-      try {
-        setLoading(true);
-        setError("");
+      setError("");
 
+      if (scanIdFromUrl) {
+        setScanId(scanIdFromUrl);
+        setBootLoading(false);
+        return;
+      }
+
+      try {
+        setBootLoading(true);
         const res = await fetch("/api/last-scan", { cache: "no-store" });
         const data = await res.json();
 
         if (!res.ok) {
-          // 404 = 没扫过；401 = 没登录
-          setScanId(null);
-          setError(data?.error || "No scans yet.");
+          if (!cancelled) {
+            setScanId(null);
+            setError(data?.error || "No scans yet.");
+          }
           return;
         }
 
-        setScanId(data.scan.id);
+        if (!cancelled) setScanId(data.scan.id);
       } catch (e: any) {
-        setScanId(null);
-        setError(e?.message || "Failed to load your latest scan.");
+        if (!cancelled) {
+          setScanId(null);
+          setError(e?.message || "Failed to load your latest scan.");
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setBootLoading(false);
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [scanIdFromUrl]);
 
-  // ✅ 有 scanId 后，再拉推荐
+  // 2) 拉 recs
   useEffect(() => {
     if (!scanId) return;
 
+    let cancelled = false;
+
     (async () => {
       try {
-        setLoading(true);
+        setRecsLoading(true);
         setError("");
 
-        const res = await fetch(`/api/recs?scanId=${scanId}`, { cache: "no-store" });
+        const res = await fetch(`/api/recs?scanId=${encodeURIComponent(scanId)}`, { cache: "no-store" });
         const data = await res.json();
 
         if (!res.ok) throw new Error(data?.error || "Failed to load recs.");
+
+        if (cancelled) return;
 
         setVerdict((data.verdict as Verdict) || "good");
         setAnalysis(data.analysis || "");
@@ -74,12 +90,18 @@ export default function RecsClient() {
         setScore(typeof data.score === "number" ? data.score : null);
         setItems(Array.isArray(data.alternatives) ? data.alternatives : []);
       } catch (e: any) {
-        setError(e?.message || "Failed to load recommendations.");
+        if (!cancelled) setError(e?.message || "Failed to load recommendations.");
       } finally {
-        setLoading(false);
+        if (!cancelled) setRecsLoading(false);
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [scanId]);
+
+  const loading = bootLoading || recsLoading;
 
   const header = useMemo(() => {
     if (verdict === "avoid") return "Skip it. Swap once to improve fast.";
@@ -97,7 +119,7 @@ export default function RecsClient() {
     );
   }
 
-  // ✅ 没扫过 / 没登录 / last-scan 失败
+  // 没扫过 / 没登录 / last-scan 失败
   if (!scanId) {
     return (
       <Shell>
@@ -107,7 +129,7 @@ export default function RecsClient() {
     );
   }
 
-  // ✅ 拉取 recs 出错
+  // 拉取 recs 出错
   if (error) {
     return (
       <Shell>
@@ -117,8 +139,12 @@ export default function RecsClient() {
           <div className="mt-2 text-xs text-neutral-500">scanId: {scanId}</div>
         </Card>
         <Row>
-          <Ghost onClick={() => router.back()}><ArrowLeft size={14}/> Back</Ghost>
-          <Primary onClick={() => router.push("/")}>Scan another <ChevronRight size={14}/></Primary>
+          <Ghost onClick={() => router.back()}>
+            <ArrowLeft size={14} /> Back
+          </Ghost>
+          <Primary onClick={() => router.push("/")}>
+            Scan another <ChevronRight size={14} />
+          </Primary>
         </Row>
       </Shell>
     );
@@ -129,8 +155,12 @@ export default function RecsClient() {
       <Shell>
         <Title title="Good choice 👍" sub="No swaps needed. Keep going." />
         <Row>
-          <Ghost onClick={() => router.back()}><ArrowLeft size={14}/> Back</Ghost>
-          <Primary onClick={() => router.push("/")}>Scan another <ChevronRight size={14}/></Primary>
+          <Ghost onClick={() => router.back()}>
+            <ArrowLeft size={14} /> Back
+          </Ghost>
+          <Primary onClick={() => router.push("/")}>
+            Scan another <ChevronRight size={14} />
+          </Primary>
         </Row>
       </Shell>
     );
@@ -165,42 +195,48 @@ export default function RecsClient() {
       <div className="mt-6">
         <div className="text-sm font-black text-neutral-900">Cleaner alternatives</div>
         <div className="mt-3 space-y-4">
-          {(items.length ? items : fallbackRecs(verdict)).slice(0, 3).map((it, idx) => (
-            <div key={idx} className="rounded-[24px] bg-white p-5 shadow-sm ring-1 ring-neutral-100">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="font-black text-neutral-900 truncate">{it.name}</div>
-                  <div className="mt-2 flex items-start gap-2">
-                    <div className="mt-0.5 rounded-xl bg-neutral-100 p-2">
-                      <ShieldCheck className="h-4 w-4 text-neutral-700" />
+          {(items.length ? items : fallbackRecs(verdict))
+            .slice(0, 3)
+            .map((it, idx) => (
+              <div key={idx} className="rounded-[24px] bg-white p-5 shadow-sm ring-1 ring-neutral-100">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-black text-neutral-900 truncate">{it.name}</div>
+                    <div className="mt-2 flex items-start gap-2">
+                      <div className="mt-0.5 rounded-xl bg-neutral-100 p-2">
+                        <ShieldCheck className="h-4 w-4 text-neutral-700" />
+                      </div>
+                      <div className="text-sm text-neutral-600">{it.reason}</div>
                     </div>
-                    <div className="text-sm text-neutral-600">{it.reason}</div>
                   </div>
+                  {it.price ? (
+                    <span className="shrink-0 rounded-full bg-neutral-100 px-3 py-1 text-xs font-bold text-neutral-600">
+                      {it.price}
+                    </span>
+                  ) : null}
                 </div>
-                {it.price ? (
-                  <span className="shrink-0 rounded-full bg-neutral-100 px-3 py-1 text-xs font-bold text-neutral-600">
-                    {it.price}
-                  </span>
-                ) : null}
               </div>
-            </div>
-          ))}
+            ))}
         </div>
 
-        <div className="mt-6 text-xs text-neutral-500">
-          Tip: one small swap per week changes your trend.
-        </div>
+        <div className="mt-6 text-xs text-neutral-500">Tip: one small swap per week changes your trend.</div>
       </div>
 
       <Row>
-        <Ghost onClick={() => router.back()}><ArrowLeft size={14}/> Back</Ghost>
-        <Primary onClick={() => router.push("/")}>Scan another <ChevronRight size={14}/></Primary>
+        <Ghost onClick={() => router.back()}>
+          <ArrowLeft size={14} /> Back
+        </Ghost>
+        <Primary onClick={() => router.push("/")}>
+          Scan another <ChevronRight size={14} />
+        </Primary>
       </Row>
 
       <div className="h-10" />
     </Shell>
   );
 }
+
+/* ---------- UI helpers (你原来的不动) ---------- */
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
@@ -254,7 +290,8 @@ function Pill({ verdict }: { verdict: Verdict }) {
 
   return (
     <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-black ring-1 ${cfg.cls}`}>
-      {cfg.icon}{cfg.text}
+      {cfg.icon}
+      {cfg.text}
     </span>
   );
 }
@@ -262,14 +299,14 @@ function Pill({ verdict }: { verdict: Verdict }) {
 function fallbackRecs(verdict: Verdict): RecItem[] {
   if (verdict === "avoid") {
     return [
-      { name: "Plain Greek yogurt + fruit", reason: "Lower sugar, higher protein, fewer additives.", price: "$$" },
-      { name: "Unsalted nuts / nut butter", reason: "Better fats, more satiety, less processed.", price: "$$" },
-      { name: "Whole-food snack (banana / apple)", reason: "Natural ingredients, predictable impact.", price: "$" },
+      { name: "Whole-grain crackers", reason: "More fiber and less refined flour; usually fewer additives." },
+      { name: "Plain popcorn", reason: "Simple ingredients and lower sugar; easy swap for crunch." },
+      { name: "Nuts (unsalted)", reason: "Better fats and more satiety; avoids refined carbs." },
     ];
   }
   return [
-    { name: "Lower-sugar option (same category)", reason: "Same vibe, less sugar spike.", price: "$" },
-    { name: "Short ingredient list option", reason: "Fewer additives and flavorings.", price: "$$" },
-    { name: "Whole grain / higher fiber pick", reason: "More stable energy and fullness.", price: "$$" },
+    { name: "Lower-sugar option (same category)", reason: "Same vibe, less sugar load." },
+    { name: "Short ingredient list option", reason: "Fewer additives and flavorings." },
+    { name: "Higher-fiber pick", reason: "More stable energy and fullness." },
   ];
 }
