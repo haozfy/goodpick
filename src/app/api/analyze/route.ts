@@ -1,3 +1,6 @@
+// ✅ 建议强制 node runtime（需要 Buffer / arrayBuffer 更稳）
+export const runtime = "nodejs";
+
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
@@ -32,7 +35,11 @@ type AIResult = {
   alternatives: Alternative[];
 };
 
+// ✅ 免费次数（非 Pro）：统一 3 次
 const TRIAL_LIMIT = 3;
+
+// ✅ 未登录原图限制大小：建议 12MB（iPhone 照片一般 2–6MB，偶尔更大）
+const ANON_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 
 const ALLOWED_TAGS = new Set([
   "added_sugar",
@@ -60,15 +67,18 @@ function clampInt(n: any, min: number, max: number) {
   const x = Number.isFinite(Number(n)) ? Math.trunc(Number(n)) : min;
   return Math.min(max, Math.max(min, x));
 }
+
 function clampNum(n: any, min: number, max: number) {
   const x = Number.isFinite(Number(n)) ? Number(n) : min;
   return Math.min(max, Math.max(min, x));
 }
+
 function verdictFromScore(score: number): Verdict {
   if (score >= 80) return "good";
   if (score >= 50) return "caution";
   return "avoid";
 }
+
 function safeJsonParse(content: string) {
   const cleaned = content.replace(/```json/g, "").replace(/```/g, "").trim();
   return JSON.parse(cleaned);
@@ -102,8 +112,7 @@ function normalizeAI(raw: any): AIResult {
   const score = clampInt(raw?.score, 0, 100);
 
   const vRaw = String(raw?.verdict ?? "").toLowerCase();
-  const verdict: Verdict =
-    vRaw === "good" || vRaw === "caution" || vRaw === "avoid" ? vRaw : verdictFromScore(score);
+  const verdict: Verdict = vRaw === "good" || vRaw === "caution" || vRaw === "avoid" ? vRaw : verdictFromScore(score);
 
   const analysis = String(raw?.analysis ?? "").trim().slice(0, 120);
 
@@ -139,83 +148,42 @@ function prefsToPrompt(p: Prefs) {
 function genAnonId() {
   return crypto.randomUUID();
 }
+
 function getAnonIdFromCookie(cookieHeader: string) {
   const match = cookieHeader.match(/(?:^|;\s*)gp_anon=([^;]+)/);
   return match?.[1] ? decodeURIComponent(match[1]) : null;
 }
 
-// ✅ 判断是否“像 base64”
-function looksLikeBase64(s: string) {
-  const t = s.trim();
-  if (t.length < 100) return false;
-  // 允许换行/空格的情况先去掉
-  const cleaned = t.replace(/\s+/g, "");
-  return /^[A-Za-z0-9+/=]+$/.test(cleaned);
+function fileToDataUrl(buf: Buffer, mimeType?: string) {
+  const mt = (mimeType || "").startsWith("image/") ? mimeType : "image/jpeg";
+  return `data:${mt};base64,${buf.toString("base64")}`;
 }
 
-// ✅ 服务器端把 URL 的图片拉下来转 data url（仅用于未登录兜底）
-async function fetchToDataUrl(url: string) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`Failed to fetch image: ${r.status}`);
-  const contentType = r.headers.get("content-type") || "image/jpeg";
-  const buf = Buffer.from(await r.arrayBuffer());
-  return `data:${contentType};base64,${buf.toString("base64")}`;
-}
-
-// ✅ 只用于未登录：把各种输入规整成 OpenAI 可吃的 image_url.url
-async function normalizeAnonImage(req: Request, input: string) {
-  const s = String(input || "").trim();
-  if (!s) throw new Error("Invalid image payload");
-
-  // 1) 已经是 data url
-  if (s.startsWith("data:image/")) return s;
-
-  // 2) blob: —— 服务器端无法读取（必须前端转 base64 或上传成 https）
-  if (s.startsWith("blob:")) {
-    const err: any = new Error("BLOB_URL_NOT_SUPPORTED");
-    err.code = "BLOB_URL_NOT_SUPPORTED";
-    throw err;
+async function readJsonBody(req: Request) {
+  try {
+    return await req.json();
+  } catch {
+    return null;
   }
-
-  // 3) http(s) url —— 直接用（或你也可以 fetchToDataUrl，更稳）
-  if (s.startsWith("http://") || s.startsWith("https://")) return s;
-
-  // 4) 相对路径 /xxx —— 拼绝对 URL 拉取转 data url（Safari/未登录常见）
-  if (s.startsWith("/")) {
-    const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
-    const proto = req.headers.get("x-forwarded-proto") || "https";
-    if (!host) throw new Error("Missing host header");
-    const abs = `${proto}://${host}${s}`;
-    return await fetchToDataUrl(abs);
-  }
-
-  // 5) 裸 base64 —— 补 data url
-  if (looksLikeBase64(s)) return `data:image/jpeg;base64,${s.replace(/\s+/g, "")}`;
-
-  // 6) 兼容 "base64,xxxx"
-  if (s.startsWith("base64,")) return `data:image/jpeg;${s}`;
-
-  throw new Error("Invalid image payload");
 }
 
 export async function POST(req: Request) {
   try {
-    const { imageBase64 } = await req.json();
-    if (!imageBase64) return NextResponse.json({ error: "No image provided" }, { status: 400 });
-
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
+    // ✅ anon cookie：用于统一免费计数（不管登录不登录）
     const cookieHeader = req.headers.get("cookie") || "";
     let anonId = getAnonIdFromCookie(cookieHeader);
     let shouldSetAnonCookie = false;
-
     if (!anonId) {
       anonId = genAnonId();
       shouldSetAnonCookie = true;
     }
 
-    // prefs
+    // ✅ 偏好：登录才读取
     let prefs: Prefs = { ...DEFAULT_PREFS };
     if (user) {
       const { data: prefRow } = await supabase
@@ -226,14 +194,14 @@ export async function POST(req: Request) {
       prefs = { ...DEFAULT_PREFS, ...(prefRow || {}) };
     }
 
-    // pro
+    // ✅ 是否 Pro：登录才读取
     let isPro = false;
     if (user) {
       const { data: profile } = await supabase.from("profiles").select("is_pro").eq("id", user.id).single();
       isPro = !!profile?.is_pro;
     }
 
-    // quota (按 anon_id 统一计数)
+    // ✅ 统一免费次数（非 Pro）：按 anon_scans 计数
     if (!isPro) {
       const { count, error: countError } = await supabase
         .from("anon_scans")
@@ -256,24 +224,64 @@ export async function POST(req: Request) {
       }
     }
 
-    // ✅ 登录逻辑不动：仍用原 imageBase64
-    // ✅ 未登录：强力规范化（解决 Safari pattern）
-    let imageForOpenAI = imageBase64 as string;
+    // =========================
+    // ✅ 读取图片：未登录用原图 file；登录用原 JSON 方案不变
+    // =========================
+    let imageForOpenAI: string | null = null;
+
     if (!user) {
-      try {
-        imageForOpenAI = await normalizeAnonImage(req, imageBase64);
-      } catch (e: any) {
-        // 给前端一个明确 code，别再弹 Safari 那种鬼提示
-        const code = e?.code || "BAD_IMAGE_PAYLOAD";
-        const msg =
-          code === "BLOB_URL_NOT_SUPPORTED"
-            ? "Please use base64 image (not blob URL) for anonymous scan."
-            : "Invalid image payload.";
-        return NextResponse.json({ error: msg, code }, { status: 400 });
+      // 未登录：必须走原图 file（multipart/form-data）
+      const form = await req.formData();
+      const file = form.get("image") as File | null;
+
+      if (!file) {
+        const res = NextResponse.json(
+          { error: "No image file provided", code: "NO_IMAGE_FILE" },
+          { status: 400 }
+        );
+        if (shouldSetAnonCookie && anonId) {
+          res.cookies.set("gp_anon", anonId, {
+            path: "/",
+            httpOnly: true,
+            sameSite: "lax",
+            secure: true,
+            maxAge: 60 * 60 * 24 * 365,
+          });
+        }
+        return res;
       }
+
+      if (file.size > ANON_MAX_IMAGE_BYTES) {
+        const res = NextResponse.json(
+          { error: "Image too large", code: "IMAGE_TOO_LARGE" },
+          { status: 413 }
+        );
+        if (shouldSetAnonCookie && anonId) {
+          res.cookies.set("gp_anon", anonId, {
+            path: "/",
+            httpOnly: true,
+            sameSite: "lax",
+            secure: true,
+            maxAge: 60 * 60 * 24 * 365,
+          });
+        }
+        return res;
+      }
+
+      const buf = Buffer.from(await file.arrayBuffer());
+      imageForOpenAI = fileToDataUrl(buf, file.type);
+    } else {
+      // 登录：保持你原来的 JSON + imageBase64 逻辑不变
+      const body = await readJsonBody(req);
+      const imageBase64 = body?.imageBase64;
+      if (!imageBase64) return NextResponse.json({ error: "No image provided" }, { status: 400 });
+
+      imageForOpenAI = String(imageBase64);
     }
 
-    // OpenAI
+    // =========================
+    // ✅ OpenAI 调用（保持你原来的 chat/completions 结构）
+    // =========================
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -361,7 +369,9 @@ alternatives rule:
       return NextResponse.json({ error: "AI failed to analyze" }, { status: 500 });
     }
 
-    // 写 anon_scans 计数真源（非 pro）
+    // =========================
+    // ✅ 写入：非 Pro 统一写 anon_scans（计数真源）
+    // =========================
     if (!isPro) {
       const { error: anonErr } = await supabase.from("anon_scans").insert({
         anon_id: anonId,
@@ -376,8 +386,9 @@ alternatives rule:
       if (anonErr) throw new Error(anonErr.message);
     }
 
-    // 登录写 scans（保留原行为）
+    // ✅ 登录用户：照旧写 scans（你的原逻辑）
     let saved: any = null;
+
     if (user) {
       const { data: scanData, error: dbError } = await supabase
         .from("scans")
@@ -414,6 +425,7 @@ alternatives rule:
 
     const res = NextResponse.json({ id: saved?.id ? String(saved.id) : null, scan: saved });
 
+    // ✅ set-cookie：只要本次生成了 anonId，就写回去
     if (shouldSetAnonCookie && anonId) {
       res.cookies.set("gp_anon", anonId, {
         path: "/",
