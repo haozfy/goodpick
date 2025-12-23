@@ -1,9 +1,11 @@
+// src/app/api/recs/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
 type Verdict = "good" | "caution" | "avoid";
+type Price = "$" | "$$" | "$$$";
 
 type Prefs = {
   low_sodium: boolean;
@@ -13,17 +15,17 @@ type Prefs = {
   prefer_simple_ingredients: boolean;
 };
 
-type RecItem = {
+type Alt = {
   name: string;
   reason: string;
-  price?: string;
-  // ✅ 未来你可以逐步补这些字段（有就用，没有也不报错）
-  sodium_mg?: number;
-  added_sugar_g?: number;
-  cholesterol_mg?: number;
-  ingredient_count?: number;
-  has_sweeteners?: boolean;
-  has_processed_meat?: boolean;
+  price?: Price;
+
+  // meta (may exist if you upgraded analyze)
+  sodium_mg?: number | null;
+  added_sugar_g?: number | null;
+  cholesterol_mg?: number | null;
+  ingredient_count?: number | null;
+  has_sweeteners?: boolean | null;
 };
 
 const DEFAULT_PREFS: Prefs = {
@@ -41,158 +43,128 @@ function scoreToVerdict(score: number | null | undefined): Verdict {
   return "avoid";
 }
 
-function normalizeAlternatives(raw: any): any[] {
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw;
-
-  if (typeof raw === "string") {
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-
-  if (raw?.items && Array.isArray(raw.items)) return raw.items;
-  return [];
+function isPrice(x: any): x is Price {
+  return x === "$" || x === "$$" || x === "$$$";
 }
 
-function sanitizeAlternatives(items: any[]): RecItem[] {
-  return items
-    .map((x) => {
-      const name = String(x?.name || x?.title || x?.productName || "").trim();
-      const reason = String(x?.reason || x?.why || x?.note || "").trim();
-      const price = x?.price ? String(x.price) : undefined;
-
-      // 可选 meta（没有也没关系）
-      const sodium_mg = typeof x?.sodium_mg === "number" ? x.sodium_mg : undefined;
-      const added_sugar_g = typeof x?.added_sugar_g === "number" ? x.added_sugar_g : undefined;
-      const cholesterol_mg = typeof x?.cholesterol_mg === "number" ? x.cholesterol_mg : undefined;
-      const ingredient_count = typeof x?.ingredient_count === "number" ? x.ingredient_count : undefined;
-      const has_sweeteners = typeof x?.has_sweeteners === "boolean" ? x.has_sweeteners : undefined;
-
-      return {
-        name,
-        reason,
-        price,
-        sodium_mg,
-        added_sugar_g,
-        cholesterol_mg,
-        ingredient_count,
-        has_sweeteners,
-        has_processed_meat: typeof x?.has_processed_meat === "boolean" ? x.has_processed_meat : undefined,
-      } as RecItem;
-    })
-    .filter((x) => x.name.length > 0 && x.reason.length > 0)
-    .slice(0, 30);
+function clampNum(x: any, min: number, max: number) {
+  const n = Number(x);
+  if (!Number.isFinite(n)) return null;
+  return Math.min(max, Math.max(min, n));
 }
 
-function preferenceLabels(prefs: Prefs): string[] {
-  const labels: string[] = [];
-  if (prefs.low_sodium) labels.push("Low sodium");
-  if (prefs.low_sugar) labels.push("Low sugar");
-  if (prefs.low_cholesterol) labels.push("Low cholesterol");
-  if (prefs.avoid_sweeteners) labels.push("No sweeteners");
-  if (prefs.prefer_simple_ingredients) labels.push("Simple ingredients");
-  return labels;
+function normalizeAlt(raw: any): Alt | null {
+  const name = String(raw?.name ?? "").trim().slice(0, 80);
+  if (!name) return null;
+
+  const reason = String(raw?.reason ?? "").trim().slice(0, 140);
+  const price = isPrice(raw?.price) ? raw.price : undefined;
+
+  // allow null / undefined
+  const sodium_mg = raw?.sodium_mg === null ? null : clampNum(raw?.sodium_mg, 0, 5000);
+  const added_sugar_g = raw?.added_sugar_g === null ? null : clampNum(raw?.added_sugar_g, 0, 200);
+  const cholesterol_mg = raw?.cholesterol_mg === null ? null : clampNum(raw?.cholesterol_mg, 0, 2000);
+  const ingredient_count = raw?.ingredient_count === null ? null : clampNum(raw?.ingredient_count, 0, 200);
+  const has_sweeteners =
+    typeof raw?.has_sweeteners === "boolean" ? raw.has_sweeteners : raw?.has_sweeteners === null ? null : null;
+
+  return {
+    name,
+    reason,
+    price,
+    sodium_mg,
+    added_sugar_g,
+    cholesterol_mg,
+    ingredient_count,
+    has_sweeteners,
+  };
 }
 
-// ---------- 关键词启发（当没有 meta 时用） ----------
-const SWEETENER_WORDS = [
-  "sucralose",
-  "aspartame",
-  "acesulfame",
-  "ace-k",
-  "stevia",
-  "monk fruit",
-  "erythritol",
-  "xylitol",
-  "sorbitol",
-  "maltitol",
-  "sweetener",
-];
-
-const HIGH_SODIUM_WORDS = ["high sodium", "salty", "salt", "sodium"];
-const HIGH_SUGAR_WORDS = ["high sugar", "added sugar", "sugary", "sweet"];
-const CHOLESTEROL_WORDS = ["cholesterol", "egg", "yolk", "bacon", "sausage", "processed meat", "pork"];
-
-function textHaystack(it: RecItem) {
-  return `${it.name} ${it.reason}`.toLowerCase();
+function safeArray<T = any>(x: any): T[] {
+  return Array.isArray(x) ? x : [];
 }
 
-function likelyHasSweeteners(it: RecItem): boolean {
-  if (typeof it.has_sweeteners === "boolean") return it.has_sweeteners;
-  const h = textHaystack(it);
-  return SWEETENER_WORDS.some((w) => h.includes(w));
-}
+// ✅ If meta exists, use it. If not, fall back to risk_tags heuristics.
+function hardFilter(alts: Alt[], prefs: Prefs, riskTags: string[]) {
+  let out = [...alts];
 
-// 这里的“likelyHighXXX”只用于排序/弱过滤（避免误杀）
-function likelyHighSodium(it: RecItem): boolean {
-  if (typeof it.sodium_mg === "number") return it.sodium_mg > 350; // 低盐阈值
-  const h = textHaystack(it);
-  return HIGH_SODIUM_WORDS.some((w) => h.includes(w));
-}
-function likelyHighSugar(it: RecItem): boolean {
-  if (typeof it.added_sugar_g === "number") return it.added_sugar_g > 6;
-  const h = textHaystack(it);
-  return HIGH_SUGAR_WORDS.some((w) => h.includes(w));
-}
-function likelyHighCholesterol(it: RecItem): boolean {
-  if (typeof it.cholesterol_mg === "number") return it.cholesterol_mg > 100;
-  const h = textHaystack(it);
-  return CHOLESTEROL_WORDS.some((w) => h.includes(w));
-}
-
-function preferencePenalty(it: RecItem, prefs: Prefs): number {
-  let p = 0;
-
-  // 1) 不吃甜味剂：强偏好 -> 高惩罚
-  if (prefs.avoid_sweeteners && likelyHasSweeteners(it)) p += 1000;
-
-  // 2) 少盐 / 少糖 / 少胆固醇：中等惩罚（用于排序 + 可选过滤）
-  if (prefs.low_sodium && likelyHighSodium(it)) p += 80;
-  if (prefs.low_sugar && likelyHighSugar(it)) p += 80;
-  if (prefs.low_cholesterol && likelyHighCholesterol(it)) p += 50;
-
-  // 3) 配料简单：有 ingredient_count 就按数值惩罚
-  if (prefs.prefer_simple_ingredients) {
-    if (typeof it.ingredient_count === "number") {
-      if (it.ingredient_count > 12) p += 25;
-      else if (it.ingredient_count > 8) p += 10;
-    } else {
-      // 没 meta 的时候不乱罚，避免误伤
-      p += 0;
-    }
-  }
-
-  return p;
-}
-
-function applyPreferences(items: RecItem[], prefs: Prefs): RecItem[] {
-  // 强过滤：不吃甜味剂 -> 直接过滤掉“明确含甜味剂”的项
-  let filtered = items;
+  // 1) avoid sweeteners (your hard rule)
   if (prefs.avoid_sweeteners) {
-    filtered = filtered.filter((it) => !likelyHasSweeteners(it));
+    out = out.filter((a) => a.has_sweeteners !== true);
   }
 
-  // 少盐/少糖/少胆固醇：默认不“硬过滤”（避免误杀），只排序
-  // 如果你未来给 alternatives 补齐 meta，可以打开硬过滤（见下方注释）
-  // if (prefs.low_sodium) filtered = filtered.filter(it => typeof it.sodium_mg !== "number" || it.sodium_mg <= 350);
+  // 2) low sodium
+  if (prefs.low_sodium) {
+    // If sodium known, keep those <= 450mg, else keep (unknown) but deprioritize later
+    out = out.filter((a) => a.sodium_mg === null || a.sodium_mg === undefined || a.sodium_mg <= 450);
+  }
 
-  // 排序：惩罚越低越靠前；同惩罚情况下“更具体的理由”靠前（简单启发）
-  const scored = filtered.map((it) => {
-    const penalty = preferencePenalty(it, prefs);
-    const reasonRichness = (it.reason || "").length; // 越长信息越多，暂作为次级排序
-    return { it, penalty, reasonRichness };
-  });
+  // 3) low sugar
+  if (prefs.low_sugar) {
+    // If added sugar known, keep <= 6g; unknown passes but deprioritize later
+    out = out.filter((a) => a.added_sugar_g === null || a.added_sugar_g === undefined || a.added_sugar_g <= 6);
+  }
 
-  scored.sort((a, b) => {
-    if (a.penalty !== b.penalty) return a.penalty - b.penalty;
-    return b.reasonRichness - a.reasonRichness;
-  });
+  // 4) low cholesterol (only acts when cholesterol meta exists)
+  if (prefs.low_cholesterol) {
+    out = out.filter((a) => a.cholesterol_mg === null || a.cholesterol_mg === undefined || a.cholesterol_mg <= 60);
+  }
 
-  return scored.map((x) => x.it);
+  // 5) prefer simple ingredients
+  if (prefs.prefer_simple_ingredients) {
+    out = out.filter(
+      (a) => a.ingredient_count === null || a.ingredient_count === undefined || a.ingredient_count <= 12
+    );
+  }
+
+  // If filters remove everything, loosen gently (never violate avoid_sweeteners)
+  if (out.length === 0) {
+    out = [...alts].filter((a) => (prefs.avoid_sweeteners ? a.has_sweeteners !== true : true));
+
+    // still empty? return original alts
+    if (out.length === 0) out = [...alts];
+  }
+
+  return out;
+}
+
+// Sort to match preferences: known good meta first, unknown later.
+function prefScore(a: Alt, prefs: Prefs) {
+  let s = 0;
+
+  // lower is better for these; unknown = small penalty
+  if (prefs.low_sodium) {
+    s += a.sodium_mg == null ? 3 : a.sodium_mg <= 250 ? 0 : a.sodium_mg <= 450 ? 1 : 4;
+  }
+  if (prefs.low_sugar) {
+    s += a.added_sugar_g == null ? 3 : a.added_sugar_g <= 2 ? 0 : a.added_sugar_g <= 6 ? 1 : 4;
+  }
+  if (prefs.low_cholesterol) {
+    s += a.cholesterol_mg == null ? 2 : a.cholesterol_mg <= 20 ? 0 : a.cholesterol_mg <= 60 ? 1 : 3;
+  }
+  if (prefs.prefer_simple_ingredients) {
+    s += a.ingredient_count == null ? 2 : a.ingredient_count <= 8 ? 0 : a.ingredient_count <= 12 ? 1 : 3;
+  }
+  if (prefs.avoid_sweeteners) {
+    s += a.has_sweeteners == null ? 1 : a.has_sweeteners ? 6 : 0;
+  }
+
+  return s;
+}
+
+function fallbackRecs(verdict: Verdict): Alt[] {
+  if (verdict === "avoid") {
+    return [
+      { name: "Plain Greek yogurt + fruit", reason: "Lower sugar, higher protein, fewer additives.", price: "$$" },
+      { name: "Unsalted nuts / nut butter", reason: "Better fats, more satiety, less processed.", price: "$$" },
+      { name: "Whole-food snack (banana / apple)", reason: "Natural ingredients, predictable impact.", price: "$" },
+    ];
+  }
+  return [
+    { name: "Lower-sugar option (same category)", reason: "Same vibe, less sugar spike.", price: "$" },
+    { name: "Short ingredient list option", reason: "Fewer additives and flavorings.", price: "$$" },
+    { name: "Whole grain / higher fiber pick", reason: "More stable energy and fullness.", price: "$$" },
+  ];
 }
 
 export async function GET(req: Request) {
@@ -205,19 +177,17 @@ export async function GET(req: Request) {
     const scanId = searchParams.get("scanId") || searchParams.get("scan");
     if (!scanId) return NextResponse.json({ error: "Missing scanId" }, { status: 400 });
 
-    // 1) 取 scan
-    const { data: scan, error } = await supabase
+    // 1) read scan
+    const { data: scan, error: scanErr } = await supabase
       .from("scans")
-      .select("id, product_name, analysis, alternatives, score, grade, created_at")
+      .select("id, product_name, analysis, alternatives, score, verdict, risk_tags, triggers, created_at")
       .eq("id", scanId)
       .eq("user_id", user.id)
       .single();
 
-    if (error || !scan) return NextResponse.json({ error: "Scan not found" }, { status: 404 });
+    if (scanErr || !scan) return NextResponse.json({ error: "Scan not found" }, { status: 404 });
 
-    const verdict = scoreToVerdict(scan.score);
-
-    // 2) 取 preferences（没有就默认）
+    // 2) read user prefs (optional table)
     const { data: prefRow } = await supabase
       .from("user_preferences")
       .select("low_sodium, low_sugar, low_cholesterol, avoid_sweeteners, prefer_simple_ingredients")
@@ -226,23 +196,45 @@ export async function GET(req: Request) {
 
     const prefs: Prefs = { ...DEFAULT_PREFS, ...(prefRow || {}) };
 
-    // 3) alternatives 解析 + sanitize
-    const rawItems = normalizeAlternatives(scan.alternatives);
-    const cleanItems = sanitizeAlternatives(rawItems);
+    const verdict: Verdict =
+      (scan.verdict as Verdict) || scoreToVerdict(scan.score);
 
-    // 4) 应用偏好：过滤/排序
-    const personalized = applyPreferences(cleanItems, prefs);
+    const rawAlts = safeArray(scan.alternatives);
+    const alts = rawAlts.map(normalizeAlt).filter(Boolean) as Alt[];
+
+    const riskTags = Array.isArray(scan.risk_tags) ? scan.risk_tags.map((x: any) => String(x)) : [];
+
+    // 3) apply preferences to alternatives
+    let finalAlts: Alt[] = [];
+    if (verdict === "good") {
+      finalAlts = [];
+    } else {
+      const filtered = hardFilter(alts, prefs, riskTags);
+      finalAlts = filtered
+        .sort((a, b) => prefScore(a, prefs) - prefScore(b, prefs))
+        .slice(0, 3);
+
+      if (finalAlts.length === 0) finalAlts = fallbackRecs(verdict);
+    }
+
+    // ✅ If scan.analysis empty, compose from triggers (if you store them)
+    const triggers = Array.isArray(scan.triggers) ? scan.triggers : [];
+    const analysis =
+      (scan.analysis && String(scan.analysis).trim()) ||
+      (triggers.length ? String(triggers[0]) : "");
 
     return NextResponse.json({
       scanId: scan.id,
       productName: scan.product_name || "Unknown",
-      analysis: scan.analysis || "",
+      analysis,
       score: typeof scan.score === "number" ? scan.score : null,
       verdict,
-      alternatives: personalized,
-      preferences: preferenceLabels(prefs), // ✅ 前端可显示 “Personalized for: …”
+      alternatives: finalAlts,
+      // keep for future UI upgrades (safe to ignore in current client)
+      prefs,
+      triggers,
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
+    return NextResponse.json({ error: e.message || "Server error" }, { status: 500 });
   }
 }
