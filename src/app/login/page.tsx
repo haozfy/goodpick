@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, Mail, Lock, ArrowRight } from "lucide-react";
 
 export default function LoginPage() {
@@ -11,10 +11,15 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
+
   const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = createClient();
 
-  // --- 1. 邮箱/密码 登录与注册 ---
+  // ✅ 通用 redirect：谁送我来，我送回去；没有就去 /account
+  const redirectTo = searchParams.get("redirect") || "/account";
+
+  // --- 1) 邮箱/密码 登录与注册 ---
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -36,9 +41,9 @@ export default function LoginPage() {
           password,
         });
         if (error) throw error;
-        
-        // 🔴 修改点 1：邮箱登录成功后，跳转到 /account
-        router.push("/account"); 
+
+        // ✅ 登录成功回跳 redirectTo
+        router.replace(redirectTo);
         router.refresh();
       }
     } catch (error: any) {
@@ -48,16 +53,17 @@ export default function LoginPage() {
     }
   };
 
-  // --- 2. Google 登录逻辑 ---
+  // --- 2) Google 登录逻辑 ---
   const handleGoogleLogin = async () => {
     setLoading(true);
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          // 🔴 修改点 2：增加 ?next=/account 参数
-          // 这样 auth/callback 路由就知道要跳去哪里，而不是回首页
-          redirectTo: `${location.origin}/auth/callback?next=/account`, 
+          // ✅ 把 redirectTo 交给 /auth/callback 的 next 参数
+          redirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(
+            redirectTo
+          )}`,
         },
       });
       if (error) throw error;
@@ -75,7 +81,9 @@ export default function LoginPage() {
             Good<span className="text-emerald-600">Pick</span>
           </h1>
           <p className="mt-2 text-sm text-neutral-500">
-            {isSignUp ? "Create an account to verify food." : "Welcome back, health seeker."}
+            {isSignUp
+              ? "Create an account to verify food."
+              : "Welcome back, health seeker."}
           </p>
         </div>
 
@@ -112,14 +120,19 @@ export default function LoginPage() {
             <div className="w-full border-t border-neutral-200"></div>
           </div>
           <div className="relative flex justify-center text-sm">
-            <span className="bg-neutral-50 px-2 text-neutral-400">Or with email</span>
+            <span className="bg-neutral-50 px-2 text-neutral-400">
+              Or with email
+            </span>
           </div>
         </div>
 
         <form onSubmit={handleAuth} className="space-y-4">
           <div className="space-y-2">
             <div className="relative">
-              <Mail className="absolute left-3 top-3.5 text-neutral-400" size={20} />
+              <Mail
+                className="absolute left-3 top-3.5 text-neutral-400"
+                size={20}
+              />
               <input
                 type="email"
                 placeholder="Email"
@@ -130,7 +143,10 @@ export default function LoginPage() {
               />
             </div>
             <div className="relative">
-              <Lock className="absolute left-3 top-3.5 text-neutral-400" size={20} />
+              <Lock
+                className="absolute left-3 top-3.5 text-neutral-400"
+                size={20}
+              />
               <input
                 type="password"
                 placeholder="Password"
@@ -164,7 +180,9 @@ export default function LoginPage() {
             onClick={() => setIsSignUp(!isSignUp)}
             className="text-sm font-medium text-neutral-500 hover:text-emerald-600"
           >
-            {isSignUp ? "Already have an account? Log In" : "Don't have an account? Sign Up"}
+            {isSignUp
+              ? "Already have an account? Log In"
+              : "Don't have an account? Sign Up"}
           </button>
         </div>
       </div>
