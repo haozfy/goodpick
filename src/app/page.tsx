@@ -67,7 +67,6 @@ export default function Home() {
 
         const data = await response.json();
 
-        // ✅ 只在用完之后提示登录/付费（不显示剩余次数）
         if (response.status === 403 && data?.code === "LIMIT_REACHED") {
           const go = confirm(
             "Trial completed.\n\nLog in to save history and unlock unlimited scans."
@@ -80,13 +79,20 @@ export default function Home() {
 
         if (!response.ok) throw new Error(data?.error || "Something went wrong");
 
-        // ✅ 登录有 id -> scan-result；未登录无 id -> /scan-result（你需要有这个页面）
+        // ✅ 登录有 id -> scan-result?id=xxx
         if (data?.id) {
           router.push(`/scan-result?id=${data.id}`);
-        } else {
-          sessionStorage.setItem("gp_last_scan", JSON.stringify(data.scan));
-          router.push("/result");
+          return;
         }
+
+        // ✅ 未登录：把结果塞进 sessionStorage，然后统一去 scan-result?guest=1
+        if (data?.scan) {
+          sessionStorage.setItem("gp_last_scan", JSON.stringify(data.scan));
+          router.push("/scan-result?guest=1");
+          return;
+        }
+
+        throw new Error("No result returned");
       } catch (err: any) {
         alert(err?.message || "Something went wrong");
         setIsAnalyzing(false);
@@ -97,27 +103,22 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-neutral-50 px-6 pt-14 pb-10 flex flex-col items-center">
-      {/* Subtle glow */}
       <div className="pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 w-[680px] h-[680px] rounded-full bg-emerald-400/10 blur-3xl -z-10" />
 
-      {/* Header */}
       <div className="w-full max-w-sm text-center">
         <h1 className="text-4xl font-black tracking-tight text-neutral-900">
           Good<span className="text-emerald-600">Pick</span>
         </h1>
 
-        {/* ✅ 健康路线：一句话让人秒懂 */}
         <p className="mt-3 text-base font-semibold text-neutral-800">
           Make healthier choices.
         </p>
 
-        {/* ✅ 功能解释：拍照 → 结论 */}
         <p className="mt-1 text-xs text-neutral-500">
           Snap a photo. Get a clear verdict in seconds.
         </p>
       </div>
 
-      {/* Hidden input */}
       <input
         ref={fileInputRef}
         type="file"
@@ -127,7 +128,6 @@ export default function Home() {
         className="hidden"
       />
 
-      {/* Main CTA */}
       <div className="mt-10">
         <button
           onClick={pickFile}
@@ -150,13 +150,11 @@ export default function Home() {
           )}
         </button>
 
-        {/* Micro trust line */}
         <div className="mt-4 text-center text-xs text-neutral-400">
           No signup required to try.
         </div>
       </div>
 
-      {/* Bottom */}
       <div className="mt-auto w-full max-w-sm pt-10">
         {isAuthed ? (
           <div className="flex items-center justify-between mb-3">
