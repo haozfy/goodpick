@@ -504,12 +504,6 @@ function PreviewUnlockState({ days }: { days: number }) {
                 Unlock insights <ChevronRight className="ml-1 h-4 w-4" />
               </Link>
 
-              <Link
-                href="/pricing"
-                className="inline-flex items-center justify-center rounded-2xl border border-neutral-200 bg-white px-4 py-2.5 text-sm font-black text-neutral-900 shadow-sm hover:bg-neutral-50 transition active:scale-95"
-              >
-                Go Pro <span className="ml-2 text-xs text-neutral-500 font-bold">Unlimited + trends</span>
-              </Link>
             </div>
 
             <div className="mt-3 text-[11px] text-neutral-400">

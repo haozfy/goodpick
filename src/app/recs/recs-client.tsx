@@ -332,13 +332,6 @@ function PreviewUnlockState({
               Unlock swaps <ChevronRight size={16} />
             </button>
 
-            <button
-              onClick={onPro}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 px-4 py-2.5 text-sm font-black text-white ring-1 ring-white/15 active:scale-95 transition-transform"
-            >
-              <Crown size={16} className="text-yellow-300" />
-              Go Pro
-            </button>
           </div>
 
           <div className="mt-3 text-[11px] text-white/60">
