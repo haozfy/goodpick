@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, Suspense } from "react";
+import { useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -53,6 +53,11 @@ function gradeFromData(d: any): Grade {
   return "black";
 }
 
+function isIOS() {
+  if (typeof navigator === "undefined") return false;
+  return /iPad|iPhone|iPod/.test(navigator.userAgent);
+}
+
 function ResultContent() {
   const searchParams = useSearchParams();
   const id = searchParams.get("id");
@@ -60,8 +65,11 @@ function ResultContent() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  const [shareMsg, setShareMsg] = useState("");
-  const [saveMsg, setSaveMsg] = useState("");
+  // ✅ 分开状态，避免 Share / Download 互相抢文案
+  const [shareMsg, setShareMsg] = useState<string>("");
+  const [dlMsg, setDlMsg] = useState<string>("");
+
+  const cardRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -76,6 +84,7 @@ function ResultContent() {
         setLoading(false);
       };
 
+      // A) 没有 id：兜底 sessionStorage
       if (!id) {
         const raw =
           typeof window !== "undefined"
@@ -87,6 +96,7 @@ function ResultContent() {
 
       const supabase = createClient();
 
+      // 1) 登录用户：id + user_id
       const { data: auth } = await supabase.auth.getUser();
       const user = auth?.user ?? null;
 
@@ -104,6 +114,7 @@ function ResultContent() {
         }
       }
 
+      // 2) 匿名：id + anon_id
       const anonId = getOrCreateAnonId();
       if (anonId) {
         const { data: anonScan, error: anonErr } = await supabase
@@ -119,6 +130,21 @@ function ResultContent() {
         }
       }
 
+      // 3) Public fallback：RPC
+      try {
+        const { data: pub, error: pubErr } = await supabase.rpc(
+          "get_scan_public",
+          { p_id: id }
+        );
+        if (!pubErr && pub && Array.isArray(pub) && pub[0]) {
+          commit(pub[0]);
+          return;
+        }
+      } catch {
+        // ignore
+      }
+
+      // 4) 最后兜底：sessionStorage
       const raw =
         typeof window !== "undefined"
           ? sessionStorage.getItem(GUEST_KEY)
@@ -127,7 +153,6 @@ function ResultContent() {
     };
 
     run();
-
     return () => {
       alive = false;
     };
@@ -154,6 +179,8 @@ function ResultContent() {
         backBtn: "bg-white/10 text-white hover:bg-white/20",
         pillBtn: "bg-white/10 text-white hover:bg-white/20",
         brandText: "text-white/40 hover:text-white/70",
+        // ✅ 导出背景：黑卡就用深色，避免白底闪瞎
+        exportBg: "#111827",
       };
     }
     if (grade === "yellow") {
@@ -171,6 +198,7 @@ function ResultContent() {
         backBtn: "bg-white text-neutral-900 shadow-sm hover:bg-amber-100",
         pillBtn: "bg-white text-neutral-900 shadow-sm hover:bg-amber-100",
         brandText: "text-amber-900/40 hover:text-amber-900/70",
+        exportBg: "#ffffff",
       };
     }
     return {
@@ -187,75 +215,151 @@ function ResultContent() {
       backBtn: "bg-white text-neutral-900 shadow-sm hover:bg-emerald-100",
       pillBtn: "bg-white text-neutral-900 shadow-sm hover:bg-emerald-100",
       brandText: "text-emerald-900/40 hover:text-emerald-900/70",
+      exportBg: "#ffffff",
     };
   }, [grade]);
 
   const showAlternatives = grade !== "green";
 
+  // ✅ Share：永远分享永久链接
   const handleShare = async () => {
     try {
       setShareMsg("");
 
-      if (!id) {
-        setShareMsg("Nothing to share");
+      const origin =
+        typeof window !== "undefined" ? window.location.origin : "";
+      if (!id || !origin) {
+        setShareMsg("Nothing");
         setTimeout(() => setShareMsg(""), 1200);
         return;
       }
 
-      const shareUrl = `${window.location.origin}/scan-result?id=${encodeURIComponent(
-        id
-      )}`;
-
+      const shareUrl = `${origin}/scan-result?id=${encodeURIComponent(id)}`;
       const verdictText =
         grade === "green" ? "Good" : grade === "yellow" ? "Caution" : "Avoid";
-
       const text = `GoodPick result: ${verdictText} (${
         Number.isFinite(score) ? score : 0
       }) — ${productName}`;
 
-      const nav: any = navigator;
-
-      if (nav?.share) {
-        await nav.share({ title: "GoodPick", text, url: shareUrl });
+      // 1) 系统分享
+      if ((navigator as any)?.share) {
+        await (navigator as any).share({
+          title: "GoodPick",
+          text,
+          url: shareUrl,
+        });
         setShareMsg("Shared");
         setTimeout(() => setShareMsg(""), 1200);
         return;
       }
 
-      if (navigator.clipboard) {
+      // 2) 复制链接
+      if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(shareUrl);
-        setShareMsg("Link copied");
+        setShareMsg("Copied");
         setTimeout(() => setShareMsg(""), 1200);
         return;
       }
 
-      setShareMsg("Copied");
+      // 3) 最后兜底：prompt
+      window.prompt("Copy link:", shareUrl);
+      setShareMsg("Copy");
       setTimeout(() => setShareMsg(""), 1200);
     } catch {
-      setShareMsg("Couldn’t share");
+      setShareMsg("Couldn’t");
       setTimeout(() => setShareMsg(""), 1400);
     }
   };
 
-  // ✅ 最稳保存：打开服务端图片（微信里长按保存到相册）
-  const handleSaveImage = () => {
+  // ✅ Download：最稳保存策略（iOS/微信 WebView 也尽量能落）
+  const handleDownload = async () => {
     try {
-      setSaveMsg("");
+      setDlMsg("");
 
-      if (!id) {
-        setSaveMsg("Nothing to save");
-        setTimeout(() => setSaveMsg(""), 1200);
+      const el = cardRef.current;
+      if (!el) throw new Error("no-card");
+
+      const mod = await import("html-to-image");
+
+      // ✅ iOS/微信：DataURL 往往比 blob + download 更稳
+      const dataUrl = await mod.toPng(el, {
+        pixelRatio: 3,
+        cacheBust: true,
+        backgroundColor: theme.exportBg,
+      });
+      if (!dataUrl) throw new Error("no-dataurl");
+
+      const safeName = (productName || "result")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 40);
+
+      // 1) 尝试：把 dataURL 转成 File，然后走系统分享（可“存储图像”）
+      //    但微信很多时候 canShare/files 不支持 → 会失败 → 自动走下一步
+      try {
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        const file = new File([blob], `goodpick-${safeName || "result"}.png`, {
+          type: "image/png",
+        });
+
+        const nav: any = navigator;
+        if (nav?.canShare?.({ files: [file] }) && nav?.share) {
+          await nav.share({ title: "GoodPick", files: [file] });
+          setDlMsg("Saved");
+          setTimeout(() => setDlMsg(""), 1200);
+          return;
+        }
+      } catch {
+        // ignore → fallback
+      }
+
+      // 2) ✅ 最稳兜底：新开窗口显示图片（iOS/微信：用户长按保存）
+      //    这能解决你截图里那种 “Save image, not found / Couldn’t save”
+      const w = window.open();
+      if (w) {
+        w.document.write(`
+          <html>
+            <head>
+              <title>GoodPick</title>
+              <meta name="viewport" content="width=device-width, initial-scale=1" />
+              <style>
+                body{margin:0;display:flex;align-items:center;justify-content:center;background:#000;}
+                img{max-width:100vw;max-height:100vh;}
+                .tip{position:fixed;top:12px;left:12px;right:12px;color:#fff;
+                  font:14px -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial;
+                  background:rgba(0,0,0,.55);padding:10px 12px;border-radius:12px}
+              </style>
+            </head>
+            <body>
+              <div class="tip">${
+                isIOS()
+                  ? "Long-press the image to save to Photos."
+                  : "Right-click / long-press the image to save."
+              }</div>
+              <img src="${dataUrl}" />
+            </body>
+          </html>
+        `);
+        w.document.close();
+
+        setDlMsg("Opened");
+        setTimeout(() => setDlMsg(""), 1200);
         return;
       }
 
-      const imgUrl = `/api/scan-image?id=${encodeURIComponent(id)}`;
-      window.open(imgUrl, "_blank", "noopener,noreferrer");
+      // 3) 最后兜底：a.download（部分环境可用）
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = `goodpick-${safeName || "result"}.png`;
+      a.click();
 
-      setSaveMsg("Open image → long-press save");
-      setTimeout(() => setSaveMsg(""), 1600);
+      setDlMsg("Downloaded");
+      setTimeout(() => setDlMsg(""), 1200);
     } catch {
-      setSaveMsg("Couldn’t save");
-      setTimeout(() => setSaveMsg(""), 1400);
+      setDlMsg("Couldn’t");
+      setTimeout(() => setDlMsg(""), 1400);
     }
   };
 
@@ -294,6 +398,7 @@ function ResultContent() {
     <div
       className={`min-h-screen ${theme.bg} px-6 py-8 transition-colors duration-500`}
     >
+      {/* Top nav */}
       <div className="mb-8 flex items-center justify-between">
         <Link
           href="/"
@@ -311,9 +416,12 @@ function ResultContent() {
         <div className="w-9" />
       </div>
 
+      {/* Card */}
       <div
+        ref={cardRef}
         className={`relative z-10 mx-auto w-full max-w-sm rounded-[2rem] ${theme.cardBg} p-8 shadow-2xl transition-all duration-500`}
       >
+        {/* Score ring */}
         <div className="mb-8 flex justify-center">
           <div className="relative">
             <div
@@ -330,12 +438,14 @@ function ResultContent() {
           </div>
         </div>
 
+        {/* Name */}
         <h1
           className={`mb-3 text-center text-2xl font-black leading-tight ${theme.text}`}
         >
           {productName}
         </h1>
 
+        {/* Badge */}
         <div className="mb-8 flex justify-center">
           <span
             className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-wide ${theme.badge}`}
@@ -345,12 +455,14 @@ function ResultContent() {
           </span>
         </div>
 
+        {/* Analysis */}
         <div
           className={`mb-8 text-center text-sm leading-relaxed font-medium ${theme.subText}`}
         >
           {analysis}
         </div>
 
+        {/* Brand + Share/Download */}
         <div className="mb-10 flex items-center justify-between">
           <a
             href="https://goodpick.app"
@@ -367,19 +479,20 @@ function ResultContent() {
               onClick={handleShare}
               className={`rounded-full px-3 py-1.5 text-[11px] font-black tracking-wide transition-colors ${theme.pillBtn}`}
             >
-              {shareMsg || "Share"}
+              {shareMsg ? shareMsg : "Share"}
             </button>
 
             <button
               type="button"
-              onClick={handleSaveImage}
+              onClick={handleDownload}
               className={`rounded-full px-3 py-1.5 text-[11px] font-black tracking-wide transition-colors ${theme.pillBtn}`}
             >
-              {saveMsg || "Save Image"}
+              {dlMsg ? dlMsg : "Download"}
             </button>
           </div>
         </div>
 
+        {/* CTA */}
         {showAlternatives ? (
           <div className="space-y-3">
             <Link
