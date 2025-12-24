@@ -79,13 +79,13 @@ export default function Home() {
 
         if (!response.ok) throw new Error(data?.error || "Something went wrong");
 
-        // ✅ 登录有 id -> scan-result?id=xxx
+        // ✅ 登录：直接进 scan-result
         if (data?.id) {
           router.push(`/scan-result?id=${data.id}`);
           return;
         }
 
-        // ✅ 未登录：把结果塞进 sessionStorage，然后统一去 scan-result?guest=1
+        // ✅ 未登录：走 guest scan-result
         if (data?.scan) {
           sessionStorage.setItem("gp_last_scan", JSON.stringify(data.scan));
           router.push("/scan-result?guest=1");
@@ -103,22 +103,32 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-neutral-50 px-6 pt-14 pb-10 flex flex-col items-center">
+      {/* subtle glow */}
       <div className="pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 w-[680px] h-[680px] rounded-full bg-emerald-400/10 blur-3xl -z-10" />
 
+      {/* HEADER */}
       <div className="w-full max-w-sm text-center">
         <h1 className="text-4xl font-black tracking-tight text-neutral-900">
           Good<span className="text-emerald-600">Pick</span>
         </h1>
 
+        {/* 👇 一句话点明是扫食品 */}
         <p className="mt-3 text-base font-semibold text-neutral-800">
-          Make healthier choices.
+          Scan food labels.
         </p>
 
+        {/* 👇 明确“拍哪里” */}
         <p className="mt-1 text-xs text-neutral-500">
-          Snap a photo. Get a clear verdict in seconds.
+          Take a photo of the nutrition facts or ingredients — get a clear verdict in seconds.
+        </p>
+
+        {/* 👇 再补一句降低误解 */}
+        <p className="mt-1 text-[11px] text-neutral-400">
+          Best for packaged foods (nutrition label / ingredients list).
         </p>
       </div>
 
+      {/* hidden input */}
       <input
         ref={fileInputRef}
         type="file"
@@ -128,6 +138,7 @@ export default function Home() {
         className="hidden"
       />
 
+      {/* MAIN CTA */}
       <div className="mt-10">
         <button
           onClick={pickFile}
@@ -144,8 +155,12 @@ export default function Home() {
           ) : (
             <div className="flex flex-col items-center justify-center gap-3">
               <Camera size={52} />
-              <div className="text-lg font-black tracking-wide">TAKE PHOTO</div>
-              <div className="text-[11px] opacity-70">GET VERDICT</div>
+              <div className="text-lg font-black tracking-wide">
+                SCAN FOOD LABEL
+              </div>
+              <div className="text-[11px] opacity-70">
+                NUTRITION & INGREDIENTS
+              </div>
             </div>
           )}
         </button>
@@ -155,6 +170,7 @@ export default function Home() {
         </div>
       </div>
 
+      {/* BOTTOM */}
       <div className="mt-auto w-full max-w-sm pt-10">
         {isAuthed ? (
           <div className="flex items-center justify-between mb-3">
@@ -189,7 +205,9 @@ export default function Home() {
                     <div className="flex items-center gap-3">
                       <div
                         className={`h-10 w-10 rounded-full flex items-center justify-center text-white font-black ${
-                          scan.grade === "green" ? "bg-emerald-500" : "bg-neutral-900"
+                          scan.grade === "green"
+                            ? "bg-emerald-500"
+                            : "bg-neutral-900"
                         }`}
                       >
                         {scan.score}
