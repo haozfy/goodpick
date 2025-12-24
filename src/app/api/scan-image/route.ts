@@ -12,15 +12,18 @@ type ScanRow = {
   analysis: string | null;
 };
 
-// ✅ 避免 edge/ts 环境里 “process 不存在” 报错
+// ✅ Edge 环境安全读取 env，并且把 header 里不允许的字符清掉（\r \n 空格等）
 function env(name: string): string {
   const p: any = (globalThis as any).process;
-  const v = p?.env?.[name];
-  if (!v) throw new Error(`Missing env: ${name}`);
-  return String(v);
+  const raw = p?.env?.[name];
+
+  if (!raw) throw new Error(`Missing env: ${name}`);
+
+  // 关键：避免 Invalid header value
+  return String(raw).replace(/[\r\n\s]+/g, "");
 }
 
-// ✅ 不用 JSX：手写一个 element factory，route.ts 不会报 JSX 一堆错
+// ✅ 不用 JSX：避免 route.ts 里出现 JSX 导致一堆 TS/构建错误
 function h(tag: any, props: any, ...children: any[]) {
   return { type: tag, props: { ...props, children } };
 }
@@ -34,7 +37,7 @@ export async function GET(req: Request) {
     const SUPABASE_URL = env("NEXT_PUBLIC_SUPABASE_URL");
     const SERVICE_KEY = env("SUPABASE_SERVICE_ROLE_KEY");
 
-    // ✅ 用 Supabase REST(PostgREST) 拉一行，绕开 supabase-js edge 兼容坑
+    // ✅ 用 REST(PostgREST) 拉 scans 一行（最稳）
     const url =
       `${SUPABASE_URL}/rest/v1/scans` +
       `?id=eq.${encodeURIComponent(id)}` +
@@ -44,7 +47,8 @@ export async function GET(req: Request) {
     const r = await fetch(url, {
       headers: {
         apikey: SERVICE_KEY,
-        Authorization: `Bearer ${SERVICE_KEY}`,
+        authorization: `Bearer ${SERVICE_KEY}`,
+        "content-type": "application/json",
       },
       cache: "no-store",
     });
@@ -95,7 +99,8 @@ export async function GET(req: Request) {
           alignItems: "center",
           justifyContent: "center",
           padding: 60,
-          fontFamily: "system-ui, -apple-system, Segoe UI, Roboto",
+          fontFamily:
+            "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial",
         },
       },
       h(
@@ -153,6 +158,7 @@ export async function GET(req: Request) {
               color: text,
               textAlign: "center",
               lineHeight: 1.1,
+              maxWidth: 640,
             },
           },
           productName

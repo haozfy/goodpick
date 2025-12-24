@@ -76,7 +76,6 @@ function ResultContent() {
         setLoading(false);
       };
 
-      // guest: no id => sessionStorage
       if (!id) {
         const raw =
           typeof window !== "undefined"
@@ -120,7 +119,6 @@ function ResultContent() {
         }
       }
 
-      // last fallback: sessionStorage
       const raw =
         typeof window !== "undefined"
           ? sessionStorage.getItem(GUEST_KEY)
@@ -239,8 +237,8 @@ function ResultContent() {
     }
   };
 
-  // ✅ 最稳：打开服务端图片（微信长按保存到相册）
-  const handleSaveImage = async () => {
+  // ✅ 最稳保存：打开服务端图片（微信里长按保存到相册）
+  const handleSaveImage = () => {
     try {
       setSaveMsg("");
 
@@ -251,9 +249,8 @@ function ResultContent() {
       }
 
       const imgUrl = `/api/scan-image?id=${encodeURIComponent(id)}`;
-
-      // 直接打开图片：微信/iOS 最稳
       window.open(imgUrl, "_blank", "noopener,noreferrer");
+
       setSaveMsg("Open image → long-press save");
       setTimeout(() => setSaveMsg(""), 1600);
     } catch {
