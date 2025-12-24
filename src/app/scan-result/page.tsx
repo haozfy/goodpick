@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Suspense, useMemo, useRef } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 
 const ANON_KEY = "goodpick_anon_id";
-const GUEST_KEY = "gp_last_scan"; // 你首页存的 sessionStorage key
+const GUEST_KEY = "gp_last_scan";
 
 type Grade = "green" | "yellow" | "black";
 type Verdict = "good" | "caution" | "avoid";
@@ -60,11 +60,9 @@ function ResultContent() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // ✅ Share/Download 反馈提示
-  const [saveMsg, setSaveMsg] = useState<string>("");
-
-  // ✅ 下载图片用
-  const cardRef = useRef<HTMLDivElement | null>(null);
+  // ✅ 分开提示：Share / Download 不互相污染
+  const [shareMsg, setShareMsg] = useState("");
+  const [dlMsg, setDlMsg] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -79,7 +77,7 @@ function ResultContent() {
         setLoading(false);
       };
 
-      // A) 没有 id：兜底读 sessionStorage（理论上 B 模式下很少发生）
+      // A) 没有 id：guest 直接读 sessionStorage
       if (!id) {
         const raw =
           typeof window !== "undefined"
@@ -89,10 +87,9 @@ function ResultContent() {
         return;
       }
 
-      // B) 有 id：查 Supabase
+      // B) 有 id：查 Supabase（登录 user / anon_id）
       const supabase = createClient();
 
-      // 1) 登录：按 id + user_id 查
       const { data: auth } = await supabase.auth.getUser();
       const user = auth?.user ?? null;
 
@@ -110,9 +107,7 @@ function ResultContent() {
         }
       }
 
-      // 2) 匿名兜底：按 id + anon_id 查
       const anonId = getOrCreateAnonId();
-
       if (anonId) {
         const { data: anonScan, error: anonErr } = await supabase
           .from("scans")
@@ -127,9 +122,9 @@ function ResultContent() {
         }
       }
 
-      // ✅ D) Public fallback：解决“分享到微信/别人手机打不开”
-      // 你需要在 Supabase 建 RPC：get_scan_public(p_id uuid)
-      // 返回至少包含：id, product_name, score, verdict, grade, analysis
+      // ✅ D) Public fallback（可选）
+      // 需要你在 Supabase 建 RPC：get_scan_public(p_id uuid)
+      // 返回至少：id, product_name, score, verdict, grade, analysis
       try {
         const { data: pub, error: pubErr } = await supabase.rpc(
           "get_scan_public",
@@ -143,7 +138,7 @@ function ResultContent() {
         // ignore
       }
 
-      // C) 最后兜底：再读 sessionStorage（防止“有 id 但库没写”的情况）
+      // C) 最后兜底：再读 sessionStorage
       const raw =
         typeof window !== "undefined"
           ? sessionStorage.getItem(GUEST_KEY)
@@ -159,7 +154,6 @@ function ResultContent() {
     };
   }, [id]);
 
-  // ✅ 关键：所有 hooks / memo 都必须在任何 return 之前执行
   const grade = useMemo(() => gradeFromData(data), [data]);
   const score = Number(data?.score ?? 0);
   const productName = data?.product_name || "Unknown Product";
@@ -219,118 +213,89 @@ function ResultContent() {
 
   const showAlternatives = grade !== "green";
 
-  // ✅ Share：永远分享“永久链接”（/scan-result?id=xxx）
+  // ✅ Share：分享永久链接（微信打开是网页，不依赖 sessionStorage）
   const handleShare = async () => {
     try {
-      setSaveMsg("");
+      setShareMsg("");
 
-      const origin =
-        typeof window !== "undefined" ? window.location.origin : "";
-
-      if (!id || !origin) {
-        setSaveMsg("Nothing to share");
-        setTimeout(() => setSaveMsg(""), 1200);
+      const origin = window.location.origin;
+      if (!id) {
+        setShareMsg("Nothing to share");
+        setTimeout(() => setShareMsg(""), 1200);
         return;
       }
 
       const shareUrl = `${origin}/scan-result?id=${encodeURIComponent(id)}`;
-
       const verdictText =
         grade === "green" ? "Good" : grade === "yellow" ? "Caution" : "Avoid";
 
-      const text = `GoodPick result: ${verdictText} (${
-        Number.isFinite(score) ? score : 0
-      }) — ${productName}`;
-
-      // 1) 系统分享（iOS/Android 最好用）
-      if ((navigator as any)?.share) {
-        await (navigator as any).share({
-          title: "GoodPick",
-          text,
-          url: shareUrl,
-        });
-        setSaveMsg("Shared");
-        setTimeout(() => setSaveMsg(""), 1200);
-        return;
-      }
-
-      // 2) 复制链接
-      if (navigator.clipboard) {
-        await navigator.clipboard.writeText(shareUrl);
-        setSaveMsg("Link copied");
-        setTimeout(() => setSaveMsg(""), 1200);
-        return;
-      }
-
-      // 3) 最后兜底
-      setSaveMsg("Copied");
-      setTimeout(() => setSaveMsg(""), 1200);
-    } catch {
-      setSaveMsg("Couldn’t share");
-      setTimeout(() => setSaveMsg(""), 1400);
-    }
-  };
-
-  // ✅ Download：生成图片并在 iPhone 上可“保存到相册”
-  // - iOS/微信 WebView：优先走 navigator.share({ files })，用户可选“存储图像”
-  // - 其它环境：兜底 a.download
-  const handleDownload = async () => {
-    try {
-      setSaveMsg("");
-
-      const el = cardRef.current;
-      if (!el) throw new Error("no-card");
-
-      // npm i html-to-image
-      const mod = await import("html-to-image");
-
-      const blob = await mod.toBlob(el, {
-        pixelRatio: 3,
-        cacheBust: true,
-        backgroundColor: "#ffffff",
-      });
-
-      if (!blob) throw new Error("no-blob");
-
-      const safeName = (productName || "result")
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .slice(0, 40);
-
-      const file = new File([blob], `goodpick-${safeName || "result"}.png`, {
-        type: "image/png",
-      });
+      const text = `GoodPick result: ${verdictText} (${Number.isFinite(score) ? score : 0}) — ${productName}`;
 
       const nav: any = navigator;
 
-      if (nav?.canShare?.({ files: [file] }) && nav?.share) {
-        await nav.share({
-          title: "GoodPick",
-          files: [file],
-        });
-        setSaveMsg("Saved");
-        setTimeout(() => setSaveMsg(""), 1200);
+      if (nav?.share) {
+        await nav.share({ title: "GoodPick", text, url: shareUrl });
+        setShareMsg("Shared");
+        setTimeout(() => setShareMsg(""), 1200);
         return;
       }
 
-      // 兜底：普通下载
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `goodpick-${safeName || "result"}.png`;
-      a.click();
-      URL.revokeObjectURL(url);
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(shareUrl);
+        setShareMsg("Link copied");
+        setTimeout(() => setShareMsg(""), 1200);
+        return;
+      }
 
-      setSaveMsg("Downloaded");
-      setTimeout(() => setSaveMsg(""), 1200);
+      setShareMsg("Copied");
+      setTimeout(() => setShareMsg(""), 1200);
     } catch {
-      setSaveMsg("Couldn’t save");
-      setTimeout(() => setSaveMsg(""), 1400);
+      setShareMsg("Couldn’t share");
+      setTimeout(() => setShareMsg(""), 1400);
     }
   };
 
-  // Loading
+  // ✅ Download：不再截 DOM（微信会空），直接拿服务端图片 /api/scan-image
+  // - iPhone：优先分享 files（系统面板里可“存储图像”）
+  // - 其它：打开图片或下载
+  const handleDownload = async () => {
+    try {
+      setDlMsg("");
+
+      if (!id) {
+        setDlMsg("Nothing to save");
+        setTimeout(() => setDlMsg(""), 1200);
+        return;
+      }
+
+      const imgUrl = `${window.location.origin}/api/scan-image?id=${encodeURIComponent(id)}`;
+
+      const res = await fetch(imgUrl, { cache: "no-store" });
+      if (!res.ok) throw new Error("fetch-failed");
+
+      const blob = await res.blob();
+      const file = new File([blob], `goodpick-${id}.png`, { type: "image/png" });
+
+      const nav: any = navigator;
+
+      // iOS/部分安卓：Share Sheet -> “存储图像”
+      if (nav?.canShare?.({ files: [file] }) && nav?.share) {
+        setDlMsg("Tap 'Save Image'");
+        await nav.share({ title: "GoodPick", files: [file] });
+        setDlMsg("");
+        return;
+      }
+
+      // 微信里往往不支持 files share：直接打开图片，用户长按保存
+      window.open(imgUrl, "_blank", "noopener,noreferrer");
+      setDlMsg("Opened image");
+      setTimeout(() => setDlMsg(""), 1200);
+    } catch {
+      setDlMsg("Couldn’t save");
+      setTimeout(() => setDlMsg(""), 1400);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-neutral-50">
@@ -342,7 +307,6 @@ function ResultContent() {
     );
   }
 
-  // Not found
   if (!data) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-neutral-50 px-6 text-center">
@@ -364,21 +328,14 @@ function ResultContent() {
   }
 
   return (
-    <div
-      className={`min-h-screen ${theme.bg} px-6 py-8 transition-colors duration-500`}
-    >
+    <div className={`min-h-screen ${theme.bg} px-6 py-8 transition-colors duration-500`}>
       {/* Top nav */}
       <div className="mb-8 flex items-center justify-between">
-        <Link
-          href="/"
-          className={`rounded-full p-2 transition-colors ${theme.backBtn}`}
-        >
+        <Link href="/" className={`rounded-full p-2 transition-colors ${theme.backBtn}`}>
           <ArrowLeft size={20} />
         </Link>
 
-        <span
-          className={`text-xs font-bold tracking-[0.2em] uppercase ${theme.topLabel}`}
-        >
+        <span className={`text-xs font-bold tracking-[0.2em] uppercase ${theme.topLabel}`}>
           Analysis Result
         </span>
 
@@ -386,52 +343,37 @@ function ResultContent() {
       </div>
 
       {/* Card */}
-      <div
-        ref={cardRef}
-        className={`relative z-10 mx-auto w-full max-w-sm rounded-[2rem] ${theme.cardBg} p-8 shadow-2xl transition-all duration-500`}
-      >
+      <div className={`relative z-10 mx-auto w-full max-w-sm rounded-[2rem] ${theme.cardBg} p-8 shadow-2xl transition-all duration-500`}>
         {/* Score ring */}
         <div className="mb-8 flex justify-center">
           <div className="relative">
-            <div
-              className={`h-40 w-40 rounded-full border-[10px] ${theme.ringBg}`}
-            />
-            <div
-              className={`absolute inset-0 rounded-full border-[10px] ${theme.ringFg}`}
-            />
-            <div
-              className={`absolute inset-0 flex items-center justify-center text-6xl font-black ${theme.text}`}
-            >
+            <div className={`h-40 w-40 rounded-full border-[10px] ${theme.ringBg}`} />
+            <div className={`absolute inset-0 rounded-full border-[10px] ${theme.ringFg}`} />
+            <div className={`absolute inset-0 flex items-center justify-center text-6xl font-black ${theme.text}`}>
               {Number.isFinite(score) ? score : 0}
             </div>
           </div>
         </div>
 
         {/* Name */}
-        <h1
-          className={`mb-3 text-center text-2xl font-black leading-tight ${theme.text}`}
-        >
+        <h1 className={`mb-3 text-center text-2xl font-black leading-tight ${theme.text}`}>
           {productName}
         </h1>
 
         {/* Badge */}
         <div className="mb-8 flex justify-center">
-          <span
-            className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-wide ${theme.badge}`}
-          >
+          <span className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-wide ${theme.badge}`}>
             {theme.icon}
             {theme.gradeText}
           </span>
         </div>
 
         {/* Analysis */}
-        <div
-          className={`mb-8 text-center text-sm leading-relaxed font-medium ${theme.subText}`}
-        >
+        <div className={`mb-8 text-center text-sm leading-relaxed font-medium ${theme.subText}`}>
           {analysis}
         </div>
 
-        {/* ✅ Brand + Share/Download */}
+        {/* Brand + Share/Download */}
         <div className="mb-10 flex items-center justify-between">
           <a
             href="https://goodpick.app"
@@ -448,7 +390,7 @@ function ResultContent() {
               onClick={handleShare}
               className={`rounded-full px-3 py-1.5 text-[11px] font-black tracking-wide transition-colors ${theme.pillBtn}`}
             >
-              {saveMsg ? saveMsg : "Share"}
+              {shareMsg || "Share"}
             </button>
 
             <button
@@ -456,7 +398,7 @@ function ResultContent() {
               onClick={handleDownload}
               className={`rounded-full px-3 py-1.5 text-[11px] font-black tracking-wide transition-colors ${theme.pillBtn}`}
             >
-              Download
+              {dlMsg || "Save Image"}
             </button>
           </div>
         </div>

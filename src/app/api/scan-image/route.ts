@@ -1,0 +1,212 @@
+import { ImageResponse } from "@vercel/og";
+
+export const runtime = "edge";
+
+type ScanRow = {
+  id: string;
+  product_name: string | null;
+  score: number | null;
+  verdict: string | null;
+  grade: string | null;
+  analysis: string | null;
+};
+
+// ✅ 避免 edge/ts 报 “process 不存在”
+function env(name: string): string {
+  const p: any = (globalThis as any).process;
+  const v = p?.env?.[name];
+  if (!v) throw new Error(`Missing env: ${name}`);
+  return String(v);
+}
+
+function h(tag: any, props: any, ...children: any[]) {
+  return { type: tag, props: { ...props, children } };
+}
+
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+    if (!id) return new Response("Missing id", { status: 400 });
+
+    const SUPABASE_URL = env("NEXT_PUBLIC_SUPABASE_URL");
+    const SERVICE_KEY = env("SUPABASE_SERVICE_ROLE_KEY");
+
+    const url =
+      `${SUPABASE_URL}/rest/v1/scans` +
+      `?id=eq.${encodeURIComponent(id)}` +
+      `&select=id,product_name,score,verdict,grade,analysis` +
+      `&limit=1`;
+
+    const r = await fetch(url, {
+      headers: {
+        apikey: SERVICE_KEY,
+        Authorization: `Bearer ${SERVICE_KEY}`,
+      },
+      cache: "no-store",
+    });
+
+    if (!r.ok) return new Response("Not found", { status: 404 });
+
+    const rows = (await r.json()) as ScanRow[];
+    const data = rows?.[0];
+    if (!data) return new Response("Not found", { status: 404 });
+
+    const grade = String(data.grade || "").toLowerCase();
+    const score = Number(data.score ?? 0);
+    const productName = data.product_name || "Unknown Product";
+    const analysis = data.analysis || "";
+
+    const isBlack = grade === "black";
+    const isYellow = grade === "yellow";
+
+    const bg = isBlack ? "#0a0a0a" : isYellow ? "#FFFBEB" : "#ECFDF5";
+    const cardBg = isBlack ? "#171717" : "#ffffff";
+    const text = isBlack ? "#ffffff" : "#111827";
+    const subText = isBlack
+      ? "#a3a3a3"
+      : isYellow
+      ? "rgba(120,53,15,0.7)"
+      : "rgba(6,95,70,0.7)";
+    const ring = isBlack ? "#ef4444" : isYellow ? "#f59e0b" : "#10b981";
+    const badgeBg = isBlack
+      ? "rgba(239,68,68,0.18)"
+      : isYellow
+      ? "#FEF3C7"
+      : "#D1FAE5";
+    const badgeText = isBlack ? "#fecaca" : isYellow ? "#92400e" : "#065f46";
+    const badgeLabel = isBlack
+      ? "BLACK CARD • AVOID"
+      : isYellow
+      ? "YELLOW CARD • CAUTION"
+      : "GREEN CARD • GOOD";
+
+    // ✅ 注意：这里完全没有 JSX，所以 route.ts 不会报 JSX 相关的一堆错误
+    const tree = h(
+      "div",
+      {
+        style: {
+          width: 1200,
+          height: 630,
+          background: bg,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 60,
+          fontFamily: "system-ui, -apple-system, Segoe UI, Roboto",
+        },
+      },
+      h(
+        "div",
+        {
+          style: {
+            width: 720,
+            background: cardBg,
+            borderRadius: 48,
+            padding: 56,
+            boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 28,
+            alignItems: "center",
+          },
+        },
+        // ring
+        h(
+          "div",
+          {
+            style: {
+              width: 210,
+              height: 210,
+              borderRadius: 999,
+              border: "14px solid rgba(0,0,0,0.06)",
+              position: "relative",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            },
+          },
+          h("div", {
+            style: {
+              position: "absolute",
+              inset: 0,
+              borderRadius: 999,
+              border: `14px solid ${ring}`,
+            },
+          }),
+          h(
+            "div",
+            { style: { fontSize: 88, fontWeight: 900, color: text } },
+            Number.isFinite(score) ? String(score) : "0"
+          )
+        ),
+
+        // product name
+        h(
+          "div",
+          {
+            style: {
+              fontSize: 44,
+              fontWeight: 900,
+              color: text,
+              textAlign: "center",
+              lineHeight: 1.1,
+            },
+          },
+          productName
+        ),
+
+        // badge
+        h(
+          "div",
+          {
+            style: {
+              padding: "10px 18px",
+              borderRadius: 999,
+              background: badgeBg,
+              color: badgeText,
+              fontSize: 18,
+              fontWeight: 800,
+              letterSpacing: 2,
+            },
+          },
+          badgeLabel
+        ),
+
+        // analysis
+        h(
+          "div",
+          {
+            style: {
+              fontSize: 24,
+              color: subText,
+              textAlign: "center",
+              lineHeight: 1.45,
+              maxWidth: 620,
+              whiteSpace: "pre-wrap",
+            },
+          },
+          analysis
+        ),
+
+        // footer
+        h(
+          "div",
+          {
+            style: {
+              marginTop: 10,
+              fontSize: 16,
+              color: "rgba(0,0,0,0.35)",
+              letterSpacing: 3,
+            },
+          },
+          "GOODPICK.APP"
+        )
+      )
+    );
+
+    return new ImageResponse(tree as any, { width: 1200, height: 630 });
+  } catch (e: any) {
+    return new Response(e?.message || "Error", { status: 500 });
+  }
+}
