@@ -80,7 +80,7 @@ export default function Home() {
 
         if (!response.ok) throw new Error(data?.error || "Something went wrong");
 
-        // ✅ 登录有 id -> scan-result；未登录无 id -> /result（你需要有这个页面）
+        // ✅ 登录有 id -> scan-result；未登录无 id -> /scan-result（你需要有这个页面）
         if (data?.id) {
           router.push(`/scan-result?id=${data.id}`);
         } else {
