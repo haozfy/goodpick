@@ -15,8 +15,8 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 
 export default function AccountPage() {
-  const [loading, setLoading] = useState(false); // 升级按钮 Loading
-  const [portalLoading, setPortalLoading] = useState(false); // 门户按钮 Loading
+  const [loading, setLoading] = useState(false);
+  const [portalLoading, setPortalLoading] = useState(false);
   const router = useRouter();
 
   const [user, setUser] = useState({
@@ -24,7 +24,6 @@ export default function AccountPage() {
     isPro: false,
   });
 
-  // 获取真实用户数据（profiles.is_pro）
   useEffect(() => {
     const fetchUser = async () => {
       const supabase = createClient();
@@ -49,7 +48,6 @@ export default function AccountPage() {
     fetchUser();
   }, []);
 
-  // 升级付费（支持 month/year）
   const handleUpgrade = async (plan: "month" | "year") => {
     setLoading(true);
     try {
@@ -68,14 +66,13 @@ export default function AccountPage() {
     }
   };
 
-  // 管理订阅
   const handleManageSubscription = async () => {
     setPortalLoading(true);
     try {
       const res = await fetch("/api/portal", { method: "POST" });
       const data = await res.json();
       if (data.url) window.location.href = data.url;
-      else alert("Failed to open portal. (Are you sure you have a subscription?)");
+      else alert("Failed to open portal.");
     } catch {
       alert("Error opening portal");
     } finally {
@@ -83,7 +80,6 @@ export default function AccountPage() {
     }
   };
 
-  // 登出
   const handleSignOut = async () => {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -93,13 +89,12 @@ export default function AccountPage() {
 
   return (
     <div className="min-h-screen bg-neutral-50 pb-28">
-      {/* 顶部标题 */}
       <header className="px-6 pt-14 pb-8">
         <h1 className="text-3xl font-bold text-neutral-900">Account</h1>
       </header>
 
       <div className="px-6 space-y-6">
-        {/* 1) 个人信息卡片 */}
+        {/* 用户信息 */}
         <div className="flex items-center gap-4 rounded-[24px] bg-white p-5 shadow-sm ring-1 ring-neutral-100">
           <div className="flex h-16 w-16 items-center justify-center rounded-full bg-neutral-100 text-neutral-400">
             <User size={32} />
@@ -112,9 +107,9 @@ export default function AccountPage() {
           </div>
         </div>
 
-        {/* 2) 会员状态卡片 */}
+        {/* 会员卡 */}
         <div
-          className={`relative overflow-hidden rounded-[24px] p-6 text-white shadow-lg transition-all ${
+          className={`relative overflow-hidden rounded-[24px] p-6 text-white shadow-lg ${
             user.isPro ? "bg-neutral-900" : "bg-emerald-500"
           }`}
         >
@@ -132,52 +127,48 @@ export default function AccountPage() {
 
             {!user.isPro && (
               <div className="mt-6 space-y-3">
-                {/* 年付（主推） */}
+                {/* 年付 */}
                 <button
-                  type="button"
                   onClick={() => handleUpgrade("year")}
                   disabled={loading}
-                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-black text-emerald-600 shadow-sm active:scale-95 transition-transform disabled:opacity-70"
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-black text-emerald-600 shadow-sm active:scale-95 disabled:opacity-70"
                 >
-                  {loading ? (
-                    <Loader2 className="animate-spin" size={16} />
-                  ) : (
-                    <CreditCard size={16} />
-                  )}
+                  {loading ? <Loader2 className="animate-spin" size={16} /> : <CreditCard size={16} />}
                   $39.99 / year · Best value
                 </button>
 
-                {/* 月付（次要） */}
+                {/* 月付 */}
                 <button
-                  type="button"
                   onClick={() => handleUpgrade("month")}
                   disabled={loading}
-                  className="w-full flex items-center justify-center rounded-xl bg-white/80 px-5 py-2 text-xs font-bold text-emerald-700 ring-1 ring-white/60 hover:bg-white active:scale-95 transition-transform disabled:opacity-70"
+                  className="w-full flex items-center justify-center rounded-xl bg-white/80 px-5 py-2 text-xs font-bold text-emerald-700 ring-1 ring-white/60 hover:bg-white active:scale-95 disabled:opacity-70"
                 >
                   $7.99 / month
                 </button>
+
+                {/* ✅ 新增：合规小字 */}
+                <p className="text-center text-[11px] text-white/80 leading-snug">
+                  Subscriptions can be canceled anytime. No refunds for current billing periods.
+                </p>
               </div>
             )}
           </div>
 
-          {/* 装饰背景 */}
           <div className="absolute -top-10 -right-10 h-32 w-32 rounded-full bg-white opacity-20 blur-2xl" />
           <div className="absolute bottom-0 right-0 p-6 opacity-10">
             <CreditCard size={64} />
           </div>
         </div>
 
-        {/* 3) 设置列表 */}
+        {/* 设置 */}
         <div className="overflow-hidden rounded-[24px] bg-white shadow-sm ring-1 ring-neutral-100">
-          {/* ✅ App Settings 入口：跳转到 /account/settings */}
           <button
-            type="button"
             onClick={() => router.push("/account/settings")}
-            className="flex w-full items-center justify-between border-b border-neutral-50 p-5 hover:bg-neutral-50 transition-colors"
+            className="flex w-full items-center justify-between border-b border-neutral-50 p-5 hover:bg-neutral-50"
           >
             <div className="flex items-center gap-3">
               <Settings size={20} className="text-neutral-400" />
-              <div className="text-left">
+              <div>
                 <div className="font-medium text-neutral-900">App Settings</div>
                 <div className="text-xs text-neutral-500">
                   Diet preferences (low sodium, low sugar, no sweeteners…)
@@ -187,36 +178,30 @@ export default function AccountPage() {
             <ChevronRight size={20} className="text-neutral-300" />
           </button>
 
-          {/* 仅 Pro 用户显示：管理订阅 */}
           {user.isPro && (
             <button
-              type="button"
               onClick={handleManageSubscription}
               disabled={portalLoading}
-              className="flex w-full items-center justify-between border-b border-neutral-50 p-5 hover:bg-neutral-50 transition-colors disabled:opacity-50"
+              className="flex w-full items-center justify-between border-b border-neutral-50 p-5 hover:bg-neutral-50 disabled:opacity-50"
             >
               <div className="flex items-center gap-3">
                 {portalLoading ? (
-                  <Loader2 size={20} className="text-emerald-500 animate-spin" />
+                  <Loader2 size={20} className="animate-spin text-emerald-500" />
                 ) : (
                   <CreditCard size={20} className="text-neutral-400" />
                 )}
-                <span className="font-medium text-neutral-900">
-                  {portalLoading ? "Opening Portal..." : "Manage Subscription"}
-                </span>
+                <span className="font-medium text-neutral-900">Manage Subscription</span>
               </div>
               <ChevronRight size={20} className="text-neutral-300" />
             </button>
           )}
 
-          {/* 登出 */}
           <button
-            type="button"
             onClick={handleSignOut}
-            className="flex w-full items-center justify-between p-5 hover:bg-rose-50 text-rose-600 group transition-colors"
+            className="flex w-full items-center justify-between p-5 hover:bg-rose-50 text-rose-600"
           >
             <div className="flex items-center gap-3">
-              <LogOut size={20} className="text-rose-400 group-hover:text-rose-600" />
+              <LogOut size={20} className="text-rose-400" />
               <span className="font-medium">Log Out</span>
             </div>
           </button>
