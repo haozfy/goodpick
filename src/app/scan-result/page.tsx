@@ -108,24 +108,39 @@ function ResultContent() {
           commit(scan);
           return;
         }
-        // 登录用户也可能是登录前扫的（anon_id），继续兜底
       }
 
       // 2) 匿名兜底：按 id + anon_id 查
       const anonId = getOrCreateAnonId();
 
       if (anonId) {
-        const { data: anonScan } = await supabase
+        const { data: anonScan, error: anonErr } = await supabase
           .from("scans")
           .select("*")
           .eq("id", id)
           .eq("anon_id", anonId)
           .maybeSingle();
 
-        if (anonScan) {
+        if (!anonErr && anonScan) {
           commit(anonScan);
           return;
         }
+      }
+
+      // ✅ D) Public fallback：解决“分享到微信/别人手机打不开”
+      // 你需要在 Supabase 建 RPC：get_scan_public(p_id uuid)
+      // 返回至少包含：id, product_name, score, verdict, grade, analysis
+      try {
+        const { data: pub, error: pubErr } = await supabase.rpc(
+          "get_scan_public",
+          { p_id: id }
+        );
+        if (!pubErr && pub && Array.isArray(pub) && pub[0]) {
+          commit(pub[0]);
+          return;
+        }
+      } catch {
+        // ignore
       }
 
       // C) 最后兜底：再读 sessionStorage（防止“有 id 但库没写”的情况）
@@ -256,21 +271,26 @@ function ResultContent() {
     }
   };
 
-  // ✅ Download：下载结果卡片图片（不提示登录）
+  // ✅ Download：生成图片并在 iPhone 上可“保存到相册”
+  // - iOS/微信 WebView：优先走 navigator.share({ files })，用户可选“存储图像”
+  // - 其它环境：兜底 a.download
   const handleDownload = async () => {
     try {
       setSaveMsg("");
 
       const el = cardRef.current;
-      if (!el) {
-        setSaveMsg("Couldn’t download");
-        setTimeout(() => setSaveMsg(""), 1400);
-        return;
-      }
+      if (!el) throw new Error("no-card");
 
       // npm i html-to-image
       const mod = await import("html-to-image");
-      const dataUrl = await mod.toPng(el, { pixelRatio: 2 });
+
+      const blob = await mod.toBlob(el, {
+        pixelRatio: 3,
+        cacheBust: true,
+        backgroundColor: "#ffffff",
+      });
+
+      if (!blob) throw new Error("no-blob");
 
       const safeName = (productName || "result")
         .toLowerCase()
@@ -278,15 +298,34 @@ function ResultContent() {
         .replace(/^-+|-+$/g, "")
         .slice(0, 40);
 
+      const file = new File([blob], `goodpick-${safeName || "result"}.png`, {
+        type: "image/png",
+      });
+
+      const nav: any = navigator;
+
+      if (nav?.canShare?.({ files: [file] }) && nav?.share) {
+        await nav.share({
+          title: "GoodPick",
+          files: [file],
+        });
+        setSaveMsg("Saved");
+        setTimeout(() => setSaveMsg(""), 1200);
+        return;
+      }
+
+      // 兜底：普通下载
+      const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = dataUrl;
+      a.href = url;
       a.download = `goodpick-${safeName || "result"}.png`;
       a.click();
+      URL.revokeObjectURL(url);
 
       setSaveMsg("Downloaded");
       setTimeout(() => setSaveMsg(""), 1200);
     } catch {
-      setSaveMsg("Couldn’t download");
+      setSaveMsg("Couldn’t save");
       setTimeout(() => setSaveMsg(""), 1400);
     }
   };
