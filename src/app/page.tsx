@@ -112,27 +112,22 @@ export default function Home() {
           Good<span className="text-emerald-600">Pick</span>
         </h1>
 
-        {/* ✅ 改：判断型钩子（替代 Scan food labels.） */}
         <p className="mt-3 text-base font-black text-neutral-900">
           One scan. One decision.
         </p>
 
-        {/* ✅ 改：先给结论的心智（不讲 nutrition facts） */}
         <p className="mt-2 text-sm font-semibold text-neutral-700 leading-relaxed">
           Know if a food is good — or something you should avoid.
         </p>
 
-        {/* ✅ 改：敏感词触发 + and more 终结追问 */}
         <p className="mt-2 text-xs text-neutral-500">
           Checks sugar, fat, sodium, cholesterol, additives — and more.
         </p>
 
-        {/* ✅ 新增：价值观低语（小、克制） */}
         <p className="mt-2 text-[11px] text-neutral-400 italic">
           You are what you eat.
         </p>
 
-        {/* ✅ 原来的“Best for packaged foods...”不建议首屏出现，改成更不限制用户的说法 */}
         <p className="mt-2 text-[11px] text-neutral-400">
           Works best with packaged food labels.
         </p>
@@ -143,7 +138,7 @@ export default function Home() {
         ref={fileInputRef}
         type="file"
         accept="image/*"
-        capture="environment"
+        // ✅ 关键改动：去掉 capture，iPhone 会恢复 “Photo Library/Choose Photo”
         onChange={handleFileChange}
         className="hidden"
       />
@@ -169,7 +164,6 @@ export default function Home() {
                 SCAN FOOD LABEL
               </div>
 
-              {/* ✅ 改：按钮内的小字也从“说明书”变成“判断范围” */}
               <div className="text-[11px] opacity-70">
                 SUGAR • FAT • SODIUM • ADDITIVES
               </div>
@@ -177,7 +171,6 @@ export default function Home() {
           )}
         </button>
 
-        {/* ✅ 改：更像转化文案，而不是 try */}
         <div className="mt-4 text-center text-xs text-neutral-400">
           No signup required.
         </div>
