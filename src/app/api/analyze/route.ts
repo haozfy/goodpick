@@ -6,6 +6,9 @@ import { createClient } from "@/lib/supabase/server";
 
 type Verdict = "good" | "caution" | "avoid";
 
+// ✅ NEW: 三档
+type Grade = "green" | "yellow" | "black";
+
 type Prefs = {
   low_sodium: boolean;
   low_sugar: boolean;
@@ -79,6 +82,13 @@ function verdictFromScore(score: number): Verdict {
   return "avoid";
 }
 
+// ✅ NEW: verdict -> grade（三档）
+function gradeFromVerdict(v: Verdict): Grade {
+  if (v === "good") return "green";
+  if (v === "caution") return "yellow";
+  return "black";
+}
+
 function safeJsonParse(content: string) {
   const cleaned = content.replace(/```json/g, "").replace(/```/g, "").trim();
   return JSON.parse(cleaned);
@@ -87,24 +97,56 @@ function safeJsonParse(content: string) {
 function normalizeAlternative(a: any): Alternative {
   const name = String(a?.name ?? "").trim().slice(0, 80);
   const reason = String(a?.reason ?? "").trim().slice(0, 120);
-  const price = (["$", "$$", "$$$"].includes(a?.price) ? a.price : "$$") as "$" | "$$" | "$$$";
+  const price = (["$", "$$", "$$$"].includes(a?.price) ? a.price : "$$") as
+    | "$"
+    | "$$"
+    | "$$$";
 
   const sodium_mg =
-    a?.sodium_mg === null ? null : Number.isFinite(Number(a?.sodium_mg)) ? clampInt(a.sodium_mg, 0, 5000) : undefined;
+    a?.sodium_mg === null
+      ? null
+      : Number.isFinite(Number(a?.sodium_mg))
+      ? clampInt(a.sodium_mg, 0, 5000)
+      : undefined;
 
   const added_sugar_g =
-    a?.added_sugar_g === null ? null : Number.isFinite(Number(a?.added_sugar_g)) ? clampNum(a.added_sugar_g, 0, 200) : undefined;
+    a?.added_sugar_g === null
+      ? null
+      : Number.isFinite(Number(a?.added_sugar_g))
+      ? clampNum(a.added_sugar_g, 0, 200)
+      : undefined;
 
   const cholesterol_mg =
-    a?.cholesterol_mg === null ? null : Number.isFinite(Number(a?.cholesterol_mg)) ? clampInt(a.cholesterol_mg, 0, 2000) : undefined;
+    a?.cholesterol_mg === null
+      ? null
+      : Number.isFinite(Number(a?.cholesterol_mg))
+      ? clampInt(a.cholesterol_mg, 0, 2000)
+      : undefined;
 
   const ingredient_count =
-    a?.ingredient_count === null ? null : Number.isFinite(Number(a?.ingredient_count)) ? clampInt(a.ingredient_count, 0, 200) : undefined;
+    a?.ingredient_count === null
+      ? null
+      : Number.isFinite(Number(a?.ingredient_count))
+      ? clampInt(a.ingredient_count, 0, 200)
+      : undefined;
 
   const has_sweeteners =
-    typeof a?.has_sweeteners === "boolean" ? a.has_sweeteners : a?.has_sweeteners === null ? null : undefined;
+    typeof a?.has_sweeteners === "boolean"
+      ? a.has_sweeteners
+      : a?.has_sweeteners === null
+      ? null
+      : undefined;
 
-  return { name, reason, price, sodium_mg, added_sugar_g, cholesterol_mg, ingredient_count, has_sweeteners };
+  return {
+    name,
+    reason,
+    price,
+    sodium_mg,
+    added_sugar_g,
+    cholesterol_mg,
+    ingredient_count,
+    has_sweeteners,
+  };
 }
 
 function normalizeAI(raw: any): AIResult {
@@ -112,7 +154,10 @@ function normalizeAI(raw: any): AIResult {
   const score = clampInt(raw?.score, 0, 100);
 
   const vRaw = String(raw?.verdict ?? "").toLowerCase();
-  const verdict: Verdict = vRaw === "good" || vRaw === "caution" || vRaw === "avoid" ? vRaw : verdictFromScore(score);
+  const verdict: Verdict =
+    vRaw === "good" || vRaw === "caution" || vRaw === "avoid"
+      ? (vRaw as Verdict)
+      : verdictFromScore(score);
 
   const analysis = String(raw?.analysis ?? "").trim().slice(0, 120);
 
@@ -124,12 +169,18 @@ function normalizeAI(raw: any): AIResult {
     : [];
 
   const triggers = Array.isArray(raw?.triggers)
-    ? raw.triggers.map((x: any) => String(x).trim().slice(0, 80)).filter(Boolean).slice(0, 3)
+    ? raw.triggers
+        .map((x: any) => String(x).trim().slice(0, 80))
+        .filter(Boolean)
+        .slice(0, 3)
     : [];
 
   let alternatives: Alternative[] = [];
   if (verdict !== "good" && Array.isArray(raw?.alternatives)) {
-    alternatives = raw.alternatives.slice(0, 3).map(normalizeAlternative).filter((a: Alternative) => a.name.length > 0);
+    alternatives = raw.alternatives
+      .slice(0, 3)
+      .map(normalizeAlternative)
+      .filter((a: Alternative) => a.name.length > 0);
   }
 
   return { product_name, score, verdict, risk_tags, analysis, triggers, alternatives };
@@ -167,11 +218,7 @@ async function readJsonBody(req: Request) {
   }
 }
 
-function withAnonCookie(
-  res: NextResponse,
-  shouldSetAnonCookie: boolean,
-  anonId: string | null
-) {
+function withAnonCookie(res: NextResponse, shouldSetAnonCookie: boolean, anonId: string | null) {
   if (!shouldSetAnonCookie || !anonId) return res;
 
   // ✅ 本地 http 不要 secure，否则 cookie 写不进去（导致 anonId 不稳定）
@@ -208,7 +255,9 @@ export async function POST(req: Request) {
     if (user) {
       const { data: prefRow } = await supabase
         .from("user_preferences")
-        .select("low_sodium, low_sugar, low_cholesterol, avoid_sweeteners, prefer_simple_ingredients")
+        .select(
+          "low_sodium, low_sugar, low_cholesterol, avoid_sweeteners, prefer_simple_ingredients"
+        )
         .eq("user_id", user.id)
         .maybeSingle();
       prefs = { ...DEFAULT_PREFS, ...(prefRow || {}) };
@@ -415,13 +464,17 @@ alternatives rule:
           product_name: aiResult.product_name,
           score: aiResult.score,
           verdict: aiResult.verdict,
-          grade: aiResult.verdict === "good" ? "green" : "black",
+
+          // ✅ NEW: 三档
+          grade: gradeFromVerdict(aiResult.verdict),
+
           analysis: aiResult.analysis,
           risk_tags: aiResult.risk_tags,
           triggers: aiResult.triggers,
           alternatives: aiResult.alternatives,
         })
-        .select("id, created_at, product_name, score, verdict, analysis, risk_tags, triggers, alternatives")
+        // ✅ NEW: 返回里带 grade（前端三档就稳定了）
+        .select("id, created_at, product_name, score, verdict, grade, analysis, risk_tags, triggers, alternatives")
         .single();
 
       if (dbError) throw new Error(dbError.message);
@@ -433,6 +486,10 @@ alternatives rule:
         product_name: aiResult.product_name,
         score: aiResult.score,
         verdict: aiResult.verdict,
+
+        // ✅ NEW: guest 也带 grade（你 scan-result?guest=1 就能直接显示黄/黑）
+        grade: gradeFromVerdict(aiResult.verdict),
+
         analysis: aiResult.analysis,
         risk_tags: aiResult.risk_tags,
         triggers: aiResult.triggers,

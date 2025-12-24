@@ -1,13 +1,38 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useState, Suspense, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { ArrowLeft, CheckCircle, AlertTriangle, Loader2, ScanLine } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle,
+  AlertTriangle,
+  ShieldAlert,
+  Loader2,
+  ScanLine,
+} from "lucide-react";
 
 const ANON_KEY = "goodpick_anon_id";
-const GUEST_KEY = "gp_last_scan"; // ✅ 你首页存的 sessionStorage key
+const GUEST_KEY = "gp_last_scan"; // 你首页存的 sessionStorage key
+
+type Grade = "green" | "yellow" | "black";
+type Verdict = "good" | "caution" | "avoid";
+
+function gradeFromData(d: any): Grade {
+  const g = String(d?.grade || "").toLowerCase();
+  if (g === "green" || g === "yellow" || g === "black") return g;
+
+  const v = String(d?.verdict || "").toLowerCase() as Verdict;
+  if (v === "good") return "green";
+  if (v === "caution") return "yellow";
+  if (v === "avoid") return "black";
+
+  const s = Number(d?.score ?? 0);
+  if (s >= 80) return "green";
+  if (s >= 50) return "yellow";
+  return "black";
+}
 
 function ResultContent() {
   const searchParams = useSearchParams();
@@ -20,15 +45,18 @@ function ResultContent() {
     const run = async () => {
       setLoading(true);
 
-      // ✅ A) 没有 id：guest 直接读 sessionStorage
+      // A) 没有 id：guest 直接读 sessionStorage
       if (!id) {
-        const raw = typeof window !== "undefined" ? sessionStorage.getItem(GUEST_KEY) : null;
+        const raw =
+          typeof window !== "undefined"
+            ? sessionStorage.getItem(GUEST_KEY)
+            : null;
         setData(raw ? JSON.parse(raw) : null);
         setLoading(false);
         return;
       }
 
-      // ✅ B) 有 id：优先查 Supabase
+      // B) 有 id：优先查 Supabase
       const supabase = createClient();
 
       // 1) 登录：按 id + user_id 查
@@ -48,11 +76,14 @@ function ResultContent() {
           setLoading(false);
           return;
         }
-        // 登录用户也可能是登录前扫的（anon_id），继续往下兜底
+        // 登录用户也可能是登录前扫的（anon_id），继续兜底
       }
 
-      // 2) 匿名：按 id + anon_id 查（仅当你真的把 guest 扫描写入 scans 表时才需要）
-      const anonId = typeof window !== "undefined" ? localStorage.getItem(ANON_KEY) : null;
+      // 2) 匿名兜底：按 id + anon_id 查（只有你把 guest 写入 scans 才会命中）
+      const anonId =
+        typeof window !== "undefined"
+          ? localStorage.getItem(ANON_KEY)
+          : null;
 
       if (anonId) {
         const { data: anonScan } = await supabase
@@ -69,8 +100,11 @@ function ResultContent() {
         }
       }
 
-      // ✅ C) 查不到：最后再读一次 sessionStorage（防止“有 id 但库没写”的情况）
-      const raw = typeof window !== "undefined" ? sessionStorage.getItem(GUEST_KEY) : null;
+      // C) 最后兜底：再读 sessionStorage（防止“有 id 但库没写”的情况）
+      const raw =
+        typeof window !== "undefined"
+          ? sessionStorage.getItem(GUEST_KEY)
+          : null;
       setData(raw ? JSON.parse(raw) : null);
 
       setLoading(false);
@@ -79,17 +113,19 @@ function ResultContent() {
     run();
   }, [id]);
 
-  // --- Loading ---
+  // Loading
   if (loading) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-neutral-50">
         <Loader2 className="h-10 w-10 animate-spin text-emerald-600 mb-4" />
-        <p className="text-neutral-500 font-medium animate-pulse">Retrieving analysis...</p>
+        <p className="text-neutral-500 font-medium animate-pulse">
+          Retrieving analysis...
+        </p>
       </div>
     );
   }
 
-  // --- Not found ---
+  // Not found
   if (!data) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-neutral-50 px-6 text-center">
@@ -100,89 +136,109 @@ function ResultContent() {
         <p className="mt-2 text-neutral-500 mb-8">
           We couldn't find the analysis results for this item.
         </p>
-        <Link href="/" className="rounded-xl bg-neutral-900 px-6 py-3 text-white font-bold">
+        <Link
+          href="/"
+          className="rounded-xl bg-neutral-900 px-6 py-3 text-white font-bold"
+        >
           Scan Again
         </Link>
       </div>
     );
   }
 
-  // --- Normal ---
-  const isBlackCard = data.grade === "black" || data.verdict === "avoid";
-  const score = data.score ?? 0;
-  const productName = data.product_name || "Unknown Product";
-  const analysis = data.analysis || "No analysis details provided.";
+  const grade = useMemo(() => gradeFromData(data), [data]);
+  const score = Number(data?.score ?? 0);
+  const productName = data?.product_name || "Unknown Product";
+  const analysis = data?.analysis || "No analysis details provided.";
 
-  const theme = isBlackCard
-    ? {
+  const theme = useMemo(() => {
+    if (grade === "black") {
+      return {
         bg: "bg-neutral-900",
         cardBg: "bg-neutral-800",
         text: "text-white",
         subText: "text-neutral-400",
-        border: "border-red-500",
+        ringBg: "border-neutral-700",
+        ringFg: "border-red-500",
         badge: "bg-red-500/20 text-red-200",
         icon: <AlertTriangle size={16} />,
         gradeText: "Black Card • Avoid",
-      }
-    : {
-        bg: "bg-emerald-50",
+        topLabel: "text-white/40",
+        backBtn: "bg-white/10 text-white hover:bg-white/20",
+      };
+    }
+    if (grade === "yellow") {
+      return {
+        bg: "bg-amber-50",
         cardBg: "bg-white",
         text: "text-neutral-900",
-        subText: "text-emerald-800/70",
-        border: "border-emerald-500",
-        badge: "bg-emerald-100 text-emerald-700",
-        icon: <CheckCircle size={16} />,
-        gradeText: "Green Card • Safe",
+        subText: "text-amber-900/70",
+        ringBg: "border-amber-100",
+        ringFg: "border-amber-500",
+        badge: "bg-amber-100 text-amber-800",
+        icon: <ShieldAlert size={16} />,
+        gradeText: "Yellow Card • Caution",
+        topLabel: "text-amber-900/40",
+        backBtn: "bg-white text-neutral-900 shadow-sm hover:bg-amber-100",
       };
+    }
+    return {
+      bg: "bg-emerald-50",
+      cardBg: "bg-white",
+      text: "text-neutral-900",
+      subText: "text-emerald-900/70",
+      ringBg: "border-emerald-100",
+      ringFg: "border-emerald-500",
+      badge: "bg-emerald-100 text-emerald-700",
+      icon: <CheckCircle size={16} />,
+      gradeText: "Green Card • Good",
+      topLabel: "text-emerald-900/40",
+      backBtn: "bg-white text-neutral-900 shadow-sm hover:bg-emerald-100",
+    };
+  }, [grade]);
+
+  const showAlternatives = grade !== "green";
 
   return (
-    <div className={`min-h-screen ${theme.bg} px-6 py-8 transition-colors duration-500`}>
+    <div
+      className={`min-h-screen ${theme.bg} px-6 py-8 transition-colors duration-500`}
+    >
+      {/* Top nav */}
       <div className="mb-8 flex items-center justify-between">
-        <Link
-          href="/"
-          className={`rounded-full p-2 transition-colors ${
-            isBlackCard
-              ? "bg-white/10 text-white hover:bg-white/20"
-              : "bg-white text-neutral-900 shadow-sm hover:bg-emerald-100"
-          }`}
-        >
+        <Link href="/" className={`rounded-full p-2 transition-colors ${theme.backBtn}`}>
           <ArrowLeft size={20} />
         </Link>
-        <span
-          className={`text-xs font-bold tracking-[0.2em] uppercase ${
-            isBlackCard ? "text-white/40" : "text-emerald-900/40"
-          }`}
-        >
+
+        <span className={`text-xs font-bold tracking-[0.2em] uppercase ${theme.topLabel}`}>
           Analysis Result
         </span>
+
         <div className="w-9" />
       </div>
 
+      {/* Card */}
       <div
         className={`relative z-10 mx-auto w-full max-w-sm rounded-[2rem] ${theme.cardBg} p-8 shadow-2xl transition-all duration-500`}
       >
+        {/* Score ring */}
         <div className="mb-8 flex justify-center">
           <div className="relative">
+            <div className={`h-40 w-40 rounded-full border-[10px] ${theme.ringBg}`} />
+            <div className={`absolute inset-0 rounded-full border-[10px] ${theme.ringFg}`} />
             <div
-              className={`h-40 w-40 rounded-full border-[10px] ${
-                isBlackCard ? "border-neutral-700" : "border-emerald-100"
-              }`}
-            />
-            <div className={`absolute inset-0 rounded-full border-[10px] ${theme.border}`} />
-            <div
-              className={`absolute inset-0 flex items-center justify-center text-6xl font-black ${
-                isBlackCard ? "text-white" : "text-neutral-900"
-              }`}
+              className={`absolute inset-0 flex items-center justify-center text-6xl font-black ${theme.text}`}
             >
-              {score}
+              {Number.isFinite(score) ? score : 0}
             </div>
           </div>
         </div>
 
+        {/* Name */}
         <h1 className={`mb-3 text-center text-2xl font-black leading-tight ${theme.text}`}>
           {productName}
         </h1>
 
+        {/* Badge */}
         <div className="mb-8 flex justify-center">
           <span
             className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-wide ${theme.badge}`}
@@ -192,21 +248,23 @@ function ResultContent() {
           </span>
         </div>
 
+        {/* Analysis */}
         <div className={`mb-10 text-center text-sm leading-relaxed font-medium ${theme.subText}`}>
           "{analysis}"
         </div>
 
-        {isBlackCard ? (
+        {/* CTA */}
+        {showAlternatives ? (
           <div className="space-y-3">
-            {/* ✅ 这里 originId 没有就别带，避免 eq.null */}
+            {/* 这里 originId 没有就别带，避免 eq.null */}
             <Link
               href={id ? `/recs?originId=${id}` : "/recs"}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-4 font-bold text-white shadow-lg shadow-emerald-900/20 transition-transform active:scale-95 hover:bg-emerald-400"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-4 font-bold text-white shadow-lg shadow-emerald-900/15 transition-transform active:scale-95 hover:bg-emerald-500"
             >
               See Healthy Alternatives
             </Link>
             <p className="text-center text-[10px] text-neutral-500 uppercase tracking-wider">
-              We found better options for you
+              Cleaner options in the same category
             </p>
           </div>
         ) : (
