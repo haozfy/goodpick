@@ -41,7 +41,7 @@ function ResultContent() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // ✅ 新增：Save 提示文案
+  // ✅ Save 反馈提示
   const [saveMsg, setSaveMsg] = useState<string>("");
 
   useEffect(() => {
@@ -176,7 +176,7 @@ function ResultContent() {
 
   const showAlternatives = grade !== "green";
 
-  // ✅ 新增：Save 行为（优先系统 share，否则复制链接；guest 复制摘要）
+  // ✅ Save：优先系统 share，否则复制链接；guest 复制摘要
   const handleSave = async () => {
     try {
       setSaveMsg("");
@@ -198,7 +198,11 @@ function ResultContent() {
         : `GoodPick result: ${verdictText} (${Number.isFinite(score) ? score : 0}) — ${productName}\n(Guest scan: sign in to save history.)`;
 
       // 1) 系统分享（iOS/Android 最好用）
-      if (typeof navigator !== "undefined" && (navigator as any).share && shareUrl) {
+      if (
+        typeof navigator !== "undefined" &&
+        (navigator as any).share &&
+        shareUrl
+      ) {
         await (navigator as any).share({
           title: "GoodPick",
           text,
@@ -266,14 +270,21 @@ function ResultContent() {
   }
 
   return (
-    <div className={`min-h-screen ${theme.bg} px-6 py-8 transition-colors duration-500`}>
+    <div
+      className={`min-h-screen ${theme.bg} px-6 py-8 transition-colors duration-500`}
+    >
       {/* Top nav */}
       <div className="mb-8 flex items-center justify-between">
-        <Link href="/" className={`rounded-full p-2 transition-colors ${theme.backBtn}`}>
+        <Link
+          href="/"
+          className={`rounded-full p-2 transition-colors ${theme.backBtn}`}
+        >
           <ArrowLeft size={20} />
         </Link>
 
-        <span className={`text-xs font-bold tracking-[0.2em] uppercase ${theme.topLabel}`}>
+        <span
+          className={`text-xs font-bold tracking-[0.2em] uppercase ${theme.topLabel}`}
+        >
           Analysis Result
         </span>
 
@@ -287,33 +298,45 @@ function ResultContent() {
         {/* Score ring */}
         <div className="mb-8 flex justify-center">
           <div className="relative">
-            <div className={`h-40 w-40 rounded-full border-[10px] ${theme.ringBg}`} />
-            <div className={`absolute inset-0 rounded-full border-[10px] ${theme.ringFg}`} />
-            <div className={`absolute inset-0 flex items-center justify-center text-6xl font-black ${theme.text}`}>
+            <div
+              className={`h-40 w-40 rounded-full border-[10px] ${theme.ringBg}`}
+            />
+            <div
+              className={`absolute inset-0 rounded-full border-[10px] ${theme.ringFg}`}
+            />
+            <div
+              className={`absolute inset-0 flex items-center justify-center text-6xl font-black ${theme.text}`}
+            >
               {Number.isFinite(score) ? score : 0}
             </div>
           </div>
         </div>
 
         {/* Name */}
-        <h1 className={`mb-3 text-center text-2xl font-black leading-tight ${theme.text}`}>
+        <h1
+          className={`mb-3 text-center text-2xl font-black leading-tight ${theme.text}`}
+        >
           {productName}
         </h1>
 
         {/* Badge */}
         <div className="mb-8 flex justify-center">
-          <span className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-wide ${theme.badge}`}>
+          <span
+            className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-wide ${theme.badge}`}
+          >
             {theme.icon}
             {theme.gradeText}
           </span>
         </div>
 
         {/* Analysis */}
-        <div className={`mb-8 text-center text-sm leading-relaxed font-medium ${theme.subText}`}>
+        <div
+          className={`mb-8 text-center text-sm leading-relaxed font-medium ${theme.subText}`}
+        >
           "{analysis}"
         </div>
 
-        {/* ✅ 新增：Brand + Save（截图友好 / 可传播） */}
+        {/* ✅ Brand + Save */}
         <div className="mb-10 flex items-center justify-between">
           <a
             href="https://goodpick.app"
