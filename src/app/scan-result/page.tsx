@@ -117,7 +117,11 @@ function ResultContent() {
   const grade = useMemo(() => gradeFromData(data), [data]);
   const score = Number(data?.score ?? 0);
   const productName = data?.product_name || "Unknown Product";
-  const analysis = data?.analysis || "No analysis details provided.";
+
+  // ✅ 仅改这一句：描述更“敏感词触发 + 不变成清单”
+  const analysis =
+    data?.analysis ||
+    "Analyzed sugar, fat, sodium, cholesterol, additives — and more.";
 
   const theme = useMemo(() => {
     if (grade === "black") {
@@ -201,14 +205,21 @@ function ResultContent() {
   }
 
   return (
-    <div className={`min-h-screen ${theme.bg} px-6 py-8 transition-colors duration-500`}>
+    <div
+      className={`min-h-screen ${theme.bg} px-6 py-8 transition-colors duration-500`}
+    >
       {/* Top nav */}
       <div className="mb-8 flex items-center justify-between">
-        <Link href="/" className={`rounded-full p-2 transition-colors ${theme.backBtn}`}>
+        <Link
+          href="/"
+          className={`rounded-full p-2 transition-colors ${theme.backBtn}`}
+        >
           <ArrowLeft size={20} />
         </Link>
 
-        <span className={`text-xs font-bold tracking-[0.2em] uppercase ${theme.topLabel}`}>
+        <span
+          className={`text-xs font-bold tracking-[0.2em] uppercase ${theme.topLabel}`}
+        >
           Analysis Result
         </span>
 
@@ -222,29 +233,41 @@ function ResultContent() {
         {/* Score ring */}
         <div className="mb-8 flex justify-center">
           <div className="relative">
-            <div className={`h-40 w-40 rounded-full border-[10px] ${theme.ringBg}`} />
-            <div className={`absolute inset-0 rounded-full border-[10px] ${theme.ringFg}`} />
-            <div className={`absolute inset-0 flex items-center justify-center text-6xl font-black ${theme.text}`}>
+            <div
+              className={`h-40 w-40 rounded-full border-[10px] ${theme.ringBg}`}
+            />
+            <div
+              className={`absolute inset-0 rounded-full border-[10px] ${theme.ringFg}`}
+            />
+            <div
+              className={`absolute inset-0 flex items-center justify-center text-6xl font-black ${theme.text}`}
+            >
               {Number.isFinite(score) ? score : 0}
             </div>
           </div>
         </div>
 
         {/* Name */}
-        <h1 className={`mb-3 text-center text-2xl font-black leading-tight ${theme.text}`}>
+        <h1
+          className={`mb-3 text-center text-2xl font-black leading-tight ${theme.text}`}
+        >
           {productName}
         </h1>
 
         {/* Badge */}
         <div className="mb-8 flex justify-center">
-          <span className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-wide ${theme.badge}`}>
+          <span
+            className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-wide ${theme.badge}`}
+          >
             {theme.icon}
             {theme.gradeText}
           </span>
         </div>
 
         {/* Analysis */}
-        <div className={`mb-10 text-center text-sm leading-relaxed font-medium ${theme.subText}`}>
+        <div
+          className={`mb-10 text-center text-sm leading-relaxed font-medium ${theme.subText}`}
+        >
           "{analysis}"
         </div>
 
