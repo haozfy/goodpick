@@ -35,8 +35,8 @@ type AIResult = {
   alternatives: Alternative[];
 };
 
-// ✅ 免费次数（非 Pro）：统一 3 次
-const TRIAL_LIMIT = 3;
+// ✅ 免费次数（非 Pro）：统一 10 次
+const TRIAL_LIMIT = 10;
 
 // ✅ 未登录原图限制大小：建议 12MB（iPhone 照片一般 2–6MB，偶尔更大）
 const ANON_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
