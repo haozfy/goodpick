@@ -55,14 +55,13 @@ function gradeFromData(d: any): Grade {
 
 function ResultContent() {
   const searchParams = useSearchParams();
-  const id = searchParams.get("id"); // may be null
+  const id = searchParams.get("id");
 
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // ✅ 分开提示：Share / Download 不互相污染
   const [shareMsg, setShareMsg] = useState("");
-  const [dlMsg, setDlMsg] = useState("");
+  const [saveMsg, setSaveMsg] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -77,7 +76,7 @@ function ResultContent() {
         setLoading(false);
       };
 
-      // A) 没有 id：guest 直接读 sessionStorage
+      // guest: no id => sessionStorage
       if (!id) {
         const raw =
           typeof window !== "undefined"
@@ -87,7 +86,6 @@ function ResultContent() {
         return;
       }
 
-      // B) 有 id：查 Supabase（登录 user / anon_id）
       const supabase = createClient();
 
       const { data: auth } = await supabase.auth.getUser();
@@ -122,28 +120,11 @@ function ResultContent() {
         }
       }
 
-      // ✅ D) Public fallback（可选）
-      // 需要你在 Supabase 建 RPC：get_scan_public(p_id uuid)
-      // 返回至少：id, product_name, score, verdict, grade, analysis
-      try {
-        const { data: pub, error: pubErr } = await supabase.rpc(
-          "get_scan_public",
-          { p_id: id }
-        );
-        if (!pubErr && pub && Array.isArray(pub) && pub[0]) {
-          commit(pub[0]);
-          return;
-        }
-      } catch {
-        // ignore
-      }
-
-      // C) 最后兜底：再读 sessionStorage
+      // last fallback: sessionStorage
       const raw =
         typeof window !== "undefined"
           ? sessionStorage.getItem(GUEST_KEY)
           : null;
-
       commit(safeJsonParse<any>(raw));
     };
 
@@ -213,23 +194,26 @@ function ResultContent() {
 
   const showAlternatives = grade !== "green";
 
-  // ✅ Share：分享永久链接（微信打开是网页，不依赖 sessionStorage）
   const handleShare = async () => {
     try {
       setShareMsg("");
 
-      const origin = window.location.origin;
       if (!id) {
         setShareMsg("Nothing to share");
         setTimeout(() => setShareMsg(""), 1200);
         return;
       }
 
-      const shareUrl = `${origin}/scan-result?id=${encodeURIComponent(id)}`;
+      const shareUrl = `${window.location.origin}/scan-result?id=${encodeURIComponent(
+        id
+      )}`;
+
       const verdictText =
         grade === "green" ? "Good" : grade === "yellow" ? "Caution" : "Avoid";
 
-      const text = `GoodPick result: ${verdictText} (${Number.isFinite(score) ? score : 0}) — ${productName}`;
+      const text = `GoodPick result: ${verdictText} (${
+        Number.isFinite(score) ? score : 0
+      }) — ${productName}`;
 
       const nav: any = navigator;
 
@@ -255,44 +239,26 @@ function ResultContent() {
     }
   };
 
-  // ✅ Download：不再截 DOM（微信会空），直接拿服务端图片 /api/scan-image
-  // - iPhone：优先分享 files（系统面板里可“存储图像”）
-  // - 其它：打开图片或下载
-  const handleDownload = async () => {
+  // ✅ 最稳：打开服务端图片（微信长按保存到相册）
+  const handleSaveImage = async () => {
     try {
-      setDlMsg("");
+      setSaveMsg("");
 
       if (!id) {
-        setDlMsg("Nothing to save");
-        setTimeout(() => setDlMsg(""), 1200);
+        setSaveMsg("Nothing to save");
+        setTimeout(() => setSaveMsg(""), 1200);
         return;
       }
 
-      const imgUrl = `${window.location.origin}/api/scan-image?id=${encodeURIComponent(id)}`;
+      const imgUrl = `/api/scan-image?id=${encodeURIComponent(id)}`;
 
-      const res = await fetch(imgUrl, { cache: "no-store" });
-      if (!res.ok) throw new Error("fetch-failed");
-
-      const blob = await res.blob();
-      const file = new File([blob], `goodpick-${id}.png`, { type: "image/png" });
-
-      const nav: any = navigator;
-
-      // iOS/部分安卓：Share Sheet -> “存储图像”
-      if (nav?.canShare?.({ files: [file] }) && nav?.share) {
-        setDlMsg("Tap 'Save Image'");
-        await nav.share({ title: "GoodPick", files: [file] });
-        setDlMsg("");
-        return;
-      }
-
-      // 微信里往往不支持 files share：直接打开图片，用户长按保存
+      // 直接打开图片：微信/iOS 最稳
       window.open(imgUrl, "_blank", "noopener,noreferrer");
-      setDlMsg("Opened image");
-      setTimeout(() => setDlMsg(""), 1200);
+      setSaveMsg("Open image → long-press save");
+      setTimeout(() => setSaveMsg(""), 1600);
     } catch {
-      setDlMsg("Couldn’t save");
-      setTimeout(() => setDlMsg(""), 1400);
+      setSaveMsg("Couldn’t save");
+      setTimeout(() => setSaveMsg(""), 1400);
     }
   };
 
@@ -328,52 +294,66 @@ function ResultContent() {
   }
 
   return (
-    <div className={`min-h-screen ${theme.bg} px-6 py-8 transition-colors duration-500`}>
-      {/* Top nav */}
+    <div
+      className={`min-h-screen ${theme.bg} px-6 py-8 transition-colors duration-500`}
+    >
       <div className="mb-8 flex items-center justify-between">
-        <Link href="/" className={`rounded-full p-2 transition-colors ${theme.backBtn}`}>
+        <Link
+          href="/"
+          className={`rounded-full p-2 transition-colors ${theme.backBtn}`}
+        >
           <ArrowLeft size={20} />
         </Link>
 
-        <span className={`text-xs font-bold tracking-[0.2em] uppercase ${theme.topLabel}`}>
+        <span
+          className={`text-xs font-bold tracking-[0.2em] uppercase ${theme.topLabel}`}
+        >
           Analysis Result
         </span>
 
         <div className="w-9" />
       </div>
 
-      {/* Card */}
-      <div className={`relative z-10 mx-auto w-full max-w-sm rounded-[2rem] ${theme.cardBg} p-8 shadow-2xl transition-all duration-500`}>
-        {/* Score ring */}
+      <div
+        className={`relative z-10 mx-auto w-full max-w-sm rounded-[2rem] ${theme.cardBg} p-8 shadow-2xl transition-all duration-500`}
+      >
         <div className="mb-8 flex justify-center">
           <div className="relative">
-            <div className={`h-40 w-40 rounded-full border-[10px] ${theme.ringBg}`} />
-            <div className={`absolute inset-0 rounded-full border-[10px] ${theme.ringFg}`} />
-            <div className={`absolute inset-0 flex items-center justify-center text-6xl font-black ${theme.text}`}>
+            <div
+              className={`h-40 w-40 rounded-full border-[10px] ${theme.ringBg}`}
+            />
+            <div
+              className={`absolute inset-0 rounded-full border-[10px] ${theme.ringFg}`}
+            />
+            <div
+              className={`absolute inset-0 flex items-center justify-center text-6xl font-black ${theme.text}`}
+            >
               {Number.isFinite(score) ? score : 0}
             </div>
           </div>
         </div>
 
-        {/* Name */}
-        <h1 className={`mb-3 text-center text-2xl font-black leading-tight ${theme.text}`}>
+        <h1
+          className={`mb-3 text-center text-2xl font-black leading-tight ${theme.text}`}
+        >
           {productName}
         </h1>
 
-        {/* Badge */}
         <div className="mb-8 flex justify-center">
-          <span className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-wide ${theme.badge}`}>
+          <span
+            className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-wide ${theme.badge}`}
+          >
             {theme.icon}
             {theme.gradeText}
           </span>
         </div>
 
-        {/* Analysis */}
-        <div className={`mb-8 text-center text-sm leading-relaxed font-medium ${theme.subText}`}>
+        <div
+          className={`mb-8 text-center text-sm leading-relaxed font-medium ${theme.subText}`}
+        >
           {analysis}
         </div>
 
-        {/* Brand + Share/Download */}
         <div className="mb-10 flex items-center justify-between">
           <a
             href="https://goodpick.app"
@@ -395,15 +375,14 @@ function ResultContent() {
 
             <button
               type="button"
-              onClick={handleDownload}
+              onClick={handleSaveImage}
               className={`rounded-full px-3 py-1.5 text-[11px] font-black tracking-wide transition-colors ${theme.pillBtn}`}
             >
-              {dlMsg || "Save Image"}
+              {saveMsg || "Save Image"}
             </button>
           </div>
         </div>
 
-        {/* CTA */}
         {showAlternatives ? (
           <div className="space-y-3">
             <Link

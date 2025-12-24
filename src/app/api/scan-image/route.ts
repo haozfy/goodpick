@@ -1,3 +1,4 @@
+// src/app/api/scan-image/route.ts
 import { ImageResponse } from "@vercel/og";
 
 export const runtime = "edge";
@@ -11,7 +12,7 @@ type ScanRow = {
   analysis: string | null;
 };
 
-// ✅ 避免 edge/ts 报 “process 不存在”
+// ✅ 避免 edge/ts 环境里 “process 不存在” 报错
 function env(name: string): string {
   const p: any = (globalThis as any).process;
   const v = p?.env?.[name];
@@ -19,6 +20,7 @@ function env(name: string): string {
   return String(v);
 }
 
+// ✅ 不用 JSX：手写一个 element factory，route.ts 不会报 JSX 一堆错
 function h(tag: any, props: any, ...children: any[]) {
   return { type: tag, props: { ...props, children } };
 }
@@ -32,6 +34,7 @@ export async function GET(req: Request) {
     const SUPABASE_URL = env("NEXT_PUBLIC_SUPABASE_URL");
     const SERVICE_KEY = env("SUPABASE_SERVICE_ROLE_KEY");
 
+    // ✅ 用 Supabase REST(PostgREST) 拉一行，绕开 supabase-js edge 兼容坑
     const url =
       `${SUPABASE_URL}/rest/v1/scans` +
       `?id=eq.${encodeURIComponent(id)}` +
@@ -81,7 +84,6 @@ export async function GET(req: Request) {
       ? "YELLOW CARD • CAUTION"
       : "GREEN CARD • GOOD";
 
-    // ✅ 注意：这里完全没有 JSX，所以 route.ts 不会报 JSX 相关的一堆错误
     const tree = h(
       "div",
       {
@@ -111,7 +113,7 @@ export async function GET(req: Request) {
             alignItems: "center",
           },
         },
-        // ring
+        // Score ring
         h(
           "div",
           {
@@ -141,7 +143,7 @@ export async function GET(req: Request) {
           )
         ),
 
-        // product name
+        // Product
         h(
           "div",
           {
@@ -156,7 +158,7 @@ export async function GET(req: Request) {
           productName
         ),
 
-        // badge
+        // Badge
         h(
           "div",
           {
@@ -173,7 +175,7 @@ export async function GET(req: Request) {
           badgeLabel
         ),
 
-        // analysis
+        // Analysis
         h(
           "div",
           {
@@ -189,14 +191,14 @@ export async function GET(req: Request) {
           analysis
         ),
 
-        // footer
+        // Footer
         h(
           "div",
           {
             style: {
               marginTop: 10,
               fontSize: 16,
-              color: "rgba(0,0,0,0.35)",
+              color: isBlack ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.35)",
               letterSpacing: 3,
             },
           },
