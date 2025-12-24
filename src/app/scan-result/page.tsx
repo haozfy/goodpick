@@ -1,38 +1,40 @@
 "use client";
 
 import { useEffect, useState, Suspense } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { ArrowLeft, CheckCircle, AlertTriangle, Loader2, ScanLine } from "lucide-react";
 
 const ANON_KEY = "goodpick_anon_id";
+const GUEST_KEY = "gp_last_scan"; // ✅ 你首页存的 sessionStorage key
 
 function ResultContent() {
   const searchParams = useSearchParams();
-  const router = useRouter();
-  const id = searchParams.get("id");
+  const id = searchParams.get("id"); // may be null
 
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // ✅ 防止你截图那种 id=eq.null
-    if (!id) {
-      setLoading(false);
-      setData(null);
-      return;
-    }
-
-    const fetchData = async () => {
+    const run = async () => {
       setLoading(true);
+
+      // ✅ A) 没有 id：guest 直接读 sessionStorage
+      if (!id) {
+        const raw = typeof window !== "undefined" ? sessionStorage.getItem(GUEST_KEY) : null;
+        setData(raw ? JSON.parse(raw) : null);
+        setLoading(false);
+        return;
+      }
+
+      // ✅ B) 有 id：优先查 Supabase
       const supabase = createClient();
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
       // 1) 登录：按 id + user_id 查
+      const { data: auth } = await supabase.auth.getUser();
+      const user = auth?.user ?? null;
+
       if (user) {
         const { data: scan, error } = await supabase
           .from("scans")
@@ -46,38 +48,35 @@ function ResultContent() {
           setLoading(false);
           return;
         }
-
-        // 登录用户也可能在“登录前”扫过（anon_id 数据），继续走匿名分支兜底
+        // 登录用户也可能是登录前扫的（anon_id），继续往下兜底
       }
 
-      // 2) 匿名：按 id + anon_id 查
-      const anonId =
-        typeof window !== "undefined" ? localStorage.getItem(ANON_KEY) : null;
+      // 2) 匿名：按 id + anon_id 查（仅当你真的把 guest 扫描写入 scans 表时才需要）
+      const anonId = typeof window !== "undefined" ? localStorage.getItem(ANON_KEY) : null;
 
-      if (!anonId) {
-        setData(null);
-        setLoading(false);
-        return;
+      if (anonId) {
+        const { data: anonScan } = await supabase
+          .from("scans")
+          .select("*")
+          .eq("id", id)
+          .eq("anon_id", anonId)
+          .maybeSingle();
+
+        if (anonScan) {
+          setData(anonScan);
+          setLoading(false);
+          return;
+        }
       }
 
-      const { data: anonScan, error: anonErr } = await supabase
-        .from("scans")
-        .select("*")
-        .eq("id", id)
-        .eq("anon_id", anonId)
-        .maybeSingle();
-
-      if (anonErr) {
-        console.error("Error fetching anon scan:", anonErr);
-        setData(null);
-      } else {
-        setData(anonScan ?? null);
-      }
+      // ✅ C) 查不到：最后再读一次 sessionStorage（防止“有 id 但库没写”的情况）
+      const raw = typeof window !== "undefined" ? sessionStorage.getItem(GUEST_KEY) : null;
+      setData(raw ? JSON.parse(raw) : null);
 
       setLoading(false);
     };
 
-    fetchData();
+    run();
   }, [id]);
 
   // --- Loading ---
@@ -109,7 +108,7 @@ function ResultContent() {
   }
 
   // --- Normal ---
-  const isBlackCard = data.grade === "black";
+  const isBlackCard = data.grade === "black" || data.verdict === "avoid";
   const score = data.score ?? 0;
   const productName = data.product_name || "Unknown Product";
   const analysis = data.analysis || "No analysis details provided.";
@@ -142,23 +141,39 @@ function ResultContent() {
         <Link
           href="/"
           className={`rounded-full p-2 transition-colors ${
-            isBlackCard ? "bg-white/10 text-white hover:bg-white/20" : "bg-white text-neutral-900 shadow-sm hover:bg-emerald-100"
+            isBlackCard
+              ? "bg-white/10 text-white hover:bg-white/20"
+              : "bg-white text-neutral-900 shadow-sm hover:bg-emerald-100"
           }`}
         >
           <ArrowLeft size={20} />
         </Link>
-        <span className={`text-xs font-bold tracking-[0.2em] uppercase ${isBlackCard ? "text-white/40" : "text-emerald-900/40"}`}>
+        <span
+          className={`text-xs font-bold tracking-[0.2em] uppercase ${
+            isBlackCard ? "text-white/40" : "text-emerald-900/40"
+          }`}
+        >
           Analysis Result
         </span>
         <div className="w-9" />
       </div>
 
-      <div className={`relative z-10 mx-auto w-full max-w-sm rounded-[2rem] ${theme.cardBg} p-8 shadow-2xl transition-all duration-500`}>
+      <div
+        className={`relative z-10 mx-auto w-full max-w-sm rounded-[2rem] ${theme.cardBg} p-8 shadow-2xl transition-all duration-500`}
+      >
         <div className="mb-8 flex justify-center">
           <div className="relative">
-            <div className={`h-40 w-40 rounded-full border-[10px] ${isBlackCard ? "border-neutral-700" : "border-emerald-100"}`} />
+            <div
+              className={`h-40 w-40 rounded-full border-[10px] ${
+                isBlackCard ? "border-neutral-700" : "border-emerald-100"
+              }`}
+            />
             <div className={`absolute inset-0 rounded-full border-[10px] ${theme.border}`} />
-            <div className={`absolute inset-0 flex items-center justify-center text-6xl font-black ${isBlackCard ? "text-white" : "text-neutral-900"}`}>
+            <div
+              className={`absolute inset-0 flex items-center justify-center text-6xl font-black ${
+                isBlackCard ? "text-white" : "text-neutral-900"
+              }`}
+            >
               {score}
             </div>
           </div>
@@ -169,7 +184,9 @@ function ResultContent() {
         </h1>
 
         <div className="mb-8 flex justify-center">
-          <span className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-wide ${theme.badge}`}>
+          <span
+            className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-wide ${theme.badge}`}
+          >
             {theme.icon}
             {theme.gradeText}
           </span>
@@ -181,8 +198,9 @@ function ResultContent() {
 
         {isBlackCard ? (
           <div className="space-y-3">
+            {/* ✅ 这里 originId 没有就别带，避免 eq.null */}
             <Link
-              href={`/recs?originId=${id}`}
+              href={id ? `/recs?originId=${id}` : "/recs"}
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-4 font-bold text-white shadow-lg shadow-emerald-900/20 transition-transform active:scale-95 hover:bg-emerald-400"
             >
               See Healthy Alternatives
