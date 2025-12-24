@@ -18,14 +18,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.className} bg-neutral-50 text-neutral-900`}>
-        {/* 1. 这里如果你之前有 <TopNav />，建议先注释掉或删除。
-              因为新设计每个页面都有自己独特的顶部标题。
-        */}
-        
-        {/* 页面内容 */}
-        {children}
+        {/* 页面内容：给 BottomNav 预留空间，避免被挡 */}
+        <div className="pb-[calc(84px+env(safe-area-inset-bottom))]">
+          {children}
+        </div>
 
-        {/* 2. 全局底部导航栏 */}
+        {/* 全局底部导航栏 */}
         <BottomNav />
       </body>
     </html>
