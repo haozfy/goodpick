@@ -49,11 +49,15 @@ export default function AccountPage() {
     fetchUser();
   }, []);
 
-  // 升级付费
-  const handleUpgrade = async () => {
+  // 升级付费（支持 month/year）
+  const handleUpgrade = async (plan: "month" | "year") => {
     setLoading(true);
     try {
-      const res = await fetch("/api/checkout", { method: "POST" });
+      const res = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan }),
+      });
       const data = await res.json();
       if (data.url) window.location.href = data.url;
       else alert("Failed to start checkout");
@@ -120,26 +124,39 @@ export default function AccountPage() {
               {user.isPro && <Sparkles size={18} className="text-yellow-400" />}
             </h3>
 
-            <p className="mt-1 text-sm opacity-90 max-w-[260px] leading-relaxed">
+            <p className="mt-1 text-sm opacity-90 max-w-[300px] leading-relaxed">
               {user.isPro
                 ? "You have full access to unlimited scans and personalized preferences."
-                : "Upgrade to unlock unlimited scans and more personalized recommendations."}
+                : "Save your history, see trends, and get smarter recommendations."}
             </p>
 
             {!user.isPro && (
-              <button
-                type="button"
-                onClick={handleUpgrade}
-                disabled={loading}
-                className="mt-6 flex items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-bold text-emerald-600 shadow-sm active:scale-95 transition-transform disabled:opacity-70"
-              >
-                {loading ? (
-                  <Loader2 className="animate-spin" size={16} />
-                ) : (
-                  <CreditCard size={16} />
-                )}
-                {loading ? "Processing..." : "Upgrade for $9.99"}
-              </button>
+              <div className="mt-6 space-y-3">
+                {/* 年付（主推） */}
+                <button
+                  type="button"
+                  onClick={() => handleUpgrade("year")}
+                  disabled={loading}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-black text-emerald-600 shadow-sm active:scale-95 transition-transform disabled:opacity-70"
+                >
+                  {loading ? (
+                    <Loader2 className="animate-spin" size={16} />
+                  ) : (
+                    <CreditCard size={16} />
+                  )}
+                  $39.99 / year · Best value
+                </button>
+
+                {/* 月付（次要） */}
+                <button
+                  type="button"
+                  onClick={() => handleUpgrade("month")}
+                  disabled={loading}
+                  className="w-full flex items-center justify-center rounded-xl bg-white/80 px-5 py-2 text-xs font-bold text-emerald-700 ring-1 ring-white/60 hover:bg-white active:scale-95 transition-transform disabled:opacity-70"
+                >
+                  $7.99 / month
+                </button>
+              </div>
             )}
           </div>
 

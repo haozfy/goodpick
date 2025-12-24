@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
-import { stripe } from "@/lib/stripe"; 
-import { createClient } from "@/lib/supabase/server"; 
+import { stripe } from "@/lib/stripe";
+import { createClient } from "@/lib/supabase/server";
+
+type Body = { plan?: "month" | "year" };
 
 export async function POST(req: Request) {
   try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -13,14 +17,28 @@ export async function POST(req: Request) {
 
     const userId = user.id;
     const userEmail = user.email;
-    
-    // ⚠️ 核心修改：使用你 Vercel 里实际配置的变量名
-    const priceId = process.env.PRICE_ID_MONTHLY_PRO; 
 
-    // 增加一个检查日志，方便你调试
+    const body = (await req.json().catch(() => ({}))) as Body;
+    const plan: "month" | "year" = body.plan === "year" ? "year" : "month";
+
+    // ✅ 两个价格 ID：你需要在 Vercel env 配这两个
+    const priceId =
+      plan === "year"
+        ? process.env.PRICE_ID_YEARLY_PRO
+        : process.env.PRICE_ID_MONTHLY_PRO;
+
     if (!priceId) {
-      console.error("Error: Missing PRICE_ID_MONTHLY_PRO in environment variables.");
-      return NextResponse.json({ error: "Server Error: Price ID not configured" }, { status: 500 });
+      console.error(
+        `Error: Missing price id env var for plan=${plan}.`,
+        {
+          PRICE_ID_MONTHLY_PRO: !!process.env.PRICE_ID_MONTHLY_PRO,
+          PRICE_ID_YEARLY_PRO: !!process.env.PRICE_ID_YEARLY_PRO,
+        }
+      );
+      return NextResponse.json(
+        { error: "Server Error: Price ID not configured" },
+        { status: 500 }
+      );
     }
 
     const siteUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
@@ -32,9 +50,10 @@ export async function POST(req: Request) {
       success_url: `${siteUrl}/account?success=true`,
       cancel_url: `${siteUrl}/account?canceled=true`,
       customer_email: userEmail,
-      metadata: { 
-        userId: userId 
-      }, 
+      metadata: {
+        userId,
+        plan, // ✅ 记录一下，Webhook 里也能用
+      },
     });
 
     return NextResponse.json({ url: session.url });
