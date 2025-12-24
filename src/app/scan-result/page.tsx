@@ -41,6 +41,9 @@ function ResultContent() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
+  // ✅ 新增：Save 提示文案
+  const [saveMsg, setSaveMsg] = useState<string>("");
+
   useEffect(() => {
     const run = async () => {
       setLoading(true);
@@ -133,6 +136,8 @@ function ResultContent() {
         gradeText: "Black Card • Avoid",
         topLabel: "text-white/40",
         backBtn: "bg-white/10 text-white hover:bg-white/20",
+        saveBtn: "bg-white/10 text-white hover:bg-white/20",
+        brandText: "text-white/40 hover:text-white/70",
       };
     }
     if (grade === "yellow") {
@@ -148,6 +153,8 @@ function ResultContent() {
         gradeText: "Yellow Card • Caution",
         topLabel: "text-amber-900/40",
         backBtn: "bg-white text-neutral-900 shadow-sm hover:bg-amber-100",
+        saveBtn: "bg-white text-neutral-900 shadow-sm hover:bg-amber-100",
+        brandText: "text-amber-900/40 hover:text-amber-900/70",
       };
     }
     return {
@@ -162,10 +169,68 @@ function ResultContent() {
       gradeText: "Green Card • Good",
       topLabel: "text-emerald-900/40",
       backBtn: "bg-white text-neutral-900 shadow-sm hover:bg-emerald-100",
+      saveBtn: "bg-white text-neutral-900 shadow-sm hover:bg-emerald-100",
+      brandText: "text-emerald-900/40 hover:text-emerald-900/70",
     };
   }, [grade]);
 
   const showAlternatives = grade !== "green";
+
+  // ✅ 新增：Save 行为（优先系统 share，否则复制链接；guest 复制摘要）
+  const handleSave = async () => {
+    try {
+      setSaveMsg("");
+
+      const origin =
+        typeof window !== "undefined" ? window.location.origin : "";
+      const shareUrl =
+        typeof window !== "undefined" && id
+          ? `${origin}/scan-result?id=${encodeURIComponent(id)}`
+          : origin
+          ? `${origin}/`
+          : "";
+
+      const verdictText =
+        grade === "green" ? "Good" : grade === "yellow" ? "Caution" : "Avoid";
+
+      const text = id
+        ? `GoodPick result: ${verdictText} (${Number.isFinite(score) ? score : 0}) — ${productName}`
+        : `GoodPick result: ${verdictText} (${Number.isFinite(score) ? score : 0}) — ${productName}\n(Guest scan: sign in to save history.)`;
+
+      // 1) 系统分享（iOS/Android 最好用）
+      if (typeof navigator !== "undefined" && (navigator as any).share && shareUrl) {
+        await (navigator as any).share({
+          title: "GoodPick",
+          text,
+          url: shareUrl,
+        });
+        setSaveMsg("Saved");
+        setTimeout(() => setSaveMsg(""), 1200);
+        return;
+      }
+
+      // 2) 复制链接（有 id 才真正可传播）
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        if (id && shareUrl) {
+          await navigator.clipboard.writeText(shareUrl);
+          setSaveMsg("Link copied");
+        } else {
+          // guest：复制一段摘要（至少能“保存”）
+          await navigator.clipboard.writeText(`${text}\n\ngoodpick.app`);
+          setSaveMsg("Copied");
+        }
+        setTimeout(() => setSaveMsg(""), 1200);
+        return;
+      }
+
+      // 3) 最后兜底
+      setSaveMsg("Saved");
+      setTimeout(() => setSaveMsg(""), 1200);
+    } catch {
+      setSaveMsg("Couldn’t save");
+      setTimeout(() => setSaveMsg(""), 1400);
+    }
+  };
 
   // Loading
   if (loading) {
@@ -244,8 +309,28 @@ function ResultContent() {
         </div>
 
         {/* Analysis */}
-        <div className={`mb-10 text-center text-sm leading-relaxed font-medium ${theme.subText}`}>
+        <div className={`mb-8 text-center text-sm leading-relaxed font-medium ${theme.subText}`}>
           "{analysis}"
+        </div>
+
+        {/* ✅ 新增：Brand + Save（截图友好 / 可传播） */}
+        <div className="mb-10 flex items-center justify-between">
+          <a
+            href="https://goodpick.app"
+            target="_blank"
+            rel="noreferrer"
+            className={`text-[11px] font-bold tracking-[0.14em] uppercase ${theme.brandText}`}
+          >
+            goodpick.app
+          </a>
+
+          <button
+            type="button"
+            onClick={handleSave}
+            className={`rounded-full px-3 py-1.5 text-[11px] font-black tracking-wide transition-colors ${theme.saveBtn}`}
+          >
+            {saveMsg ? saveMsg : "Save"}
+          </button>
         </div>
 
         {/* CTA */}
