@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 
 type Verdict = "good" | "caution" | "avoid";
 
-// ✅ NEW: 三档
+// ✅ 三档
 type Grade = "green" | "yellow" | "black";
 
 type Prefs = {
@@ -82,10 +82,10 @@ function verdictFromScore(score: number): Verdict {
   return "avoid";
 }
 
-// ✅ NEW: verdict -> grade（三档）
-function gradeFromVerdict(v: Verdict): Grade {
-  if (v === "good") return "green";
-  if (v === "caution") return "yellow";
+// ✅ 只根据 score 决定三档（最稳定）
+function gradeFromScore(score: number): Grade {
+  if (score >= 80) return "green";
+  if (score >= 50) return "yellow";
   return "black";
 }
 
@@ -150,14 +150,14 @@ function normalizeAlternative(a: any): Alternative {
 }
 
 function normalizeAI(raw: any): AIResult {
-  const product_name = String(raw?.product_name ?? "").trim() || "Unknown product";
+  const product_name =
+    String(raw?.product_name ?? "").trim() || "Unknown product";
+
+  // ✅ 分数是唯一真源
   const score = clampInt(raw?.score, 0, 100);
 
-  const vRaw = String(raw?.verdict ?? "").toLowerCase();
-  const verdict: Verdict =
-    vRaw === "good" || vRaw === "caution" || vRaw === "avoid"
-      ? (vRaw as Verdict)
-      : verdictFromScore(score);
+  // ✅ verdict 强制由 score 推导（避免 AI 自相矛盾）
+  const verdict: Verdict = verdictFromScore(score);
 
   const analysis = String(raw?.analysis ?? "").trim().slice(0, 120);
 
@@ -218,10 +218,13 @@ async function readJsonBody(req: Request) {
   }
 }
 
-function withAnonCookie(res: NextResponse, shouldSetAnonCookie: boolean, anonId: string | null) {
+function withAnonCookie(
+  res: NextResponse,
+  shouldSetAnonCookie: boolean,
+  anonId: string | null
+) {
   if (!shouldSetAnonCookie || !anonId) return res;
 
-  // ✅ 本地 http 不要 secure，否则 cookie 写不进去（导致 anonId 不稳定）
   const secure = process.env.NODE_ENV === "production";
 
   res.cookies.set("gp_anon", anonId, {
@@ -241,7 +244,6 @@ export async function POST(req: Request) {
       data: { user },
     } = await supabase.auth.getUser();
 
-    // ✅ anon cookie：用于统一免费计数（不管登录不登录）
     const cookieHeader = req.headers.get("cookie") || "";
     let anonId = getAnonIdFromCookie(cookieHeader);
     let shouldSetAnonCookie = false;
@@ -250,7 +252,6 @@ export async function POST(req: Request) {
       shouldSetAnonCookie = true;
     }
 
-    // ✅ 偏好：登录才读取
     let prefs: Prefs = { ...DEFAULT_PREFS };
     if (user) {
       const { data: prefRow } = await supabase
@@ -263,7 +264,6 @@ export async function POST(req: Request) {
       prefs = { ...DEFAULT_PREFS, ...(prefRow || {}) };
     }
 
-    // ✅ 是否 Pro：登录才读取
     let isPro = false;
     if (user) {
       const { data: profile } = await supabase
@@ -274,7 +274,6 @@ export async function POST(req: Request) {
       isPro = !!profile?.is_pro;
     }
 
-    // ✅ 统一免费次数（非 Pro）：按 anon_scans 计数
     if (!isPro) {
       const { count, error: countError } = await supabase
         .from("anon_scans")
@@ -292,11 +291,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // =========================
-    // ✅ 读取图片：按 Content-Type 自动识别（最稳）
-    // - multipart/form-data：读 file（未登录原图）
-    // - application/json：读 imageBase64（登录老方案）
-    // =========================
     const contentType = req.headers.get("content-type") || "";
     let imageForOpenAI: string | null = null;
 
@@ -341,9 +335,6 @@ export async function POST(req: Request) {
       return withAnonCookie(res, shouldSetAnonCookie, anonId);
     }
 
-    // =========================
-    // ✅ OpenAI 调用（保持你原来的 chat/completions 结构）
-    // =========================
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -435,15 +426,16 @@ alternatives rule:
       return withAnonCookie(res, shouldSetAnonCookie, anonId);
     }
 
-    // =========================
-    // ✅ 写入：非 Pro 统一写 anon_scans（计数真源）
-    // =========================
+    // ✅ 最终三档与 verdict：统一由 score 推导（杜绝 55 绿卡）
+    const finalVerdict = verdictFromScore(aiResult.score);
+    const finalGrade = gradeFromScore(aiResult.score);
+
     if (!isPro) {
       const { error: anonErr } = await supabase.from("anon_scans").insert({
         anon_id: anonId,
         product_name: aiResult.product_name,
         score: aiResult.score,
-        verdict: aiResult.verdict,
+        verdict: finalVerdict,
         analysis: aiResult.analysis,
         risk_tags: aiResult.risk_tags,
         triggers: aiResult.triggers,
@@ -452,7 +444,6 @@ alternatives rule:
       if (anonErr) throw new Error(anonErr.message);
     }
 
-    // ✅ 登录用户：照旧写 scans（你的原逻辑）
     let saved: any = null;
 
     if (user) {
@@ -463,17 +454,13 @@ alternatives rule:
           image_url: "",
           product_name: aiResult.product_name,
           score: aiResult.score,
-          verdict: aiResult.verdict,
-
-          // ✅ NEW: 三档
-          grade: gradeFromVerdict(aiResult.verdict),
-
+          verdict: finalVerdict,
+          grade: finalGrade,
           analysis: aiResult.analysis,
           risk_tags: aiResult.risk_tags,
           triggers: aiResult.triggers,
           alternatives: aiResult.alternatives,
         })
-        // ✅ NEW: 返回里带 grade（前端三档就稳定了）
         .select("id, created_at, product_name, score, verdict, grade, analysis, risk_tags, triggers, alternatives")
         .single();
 
@@ -485,11 +472,8 @@ alternatives rule:
         created_at: new Date().toISOString(),
         product_name: aiResult.product_name,
         score: aiResult.score,
-        verdict: aiResult.verdict,
-
-        // ✅ NEW: guest 也带 grade（你 scan-result?guest=1 就能直接显示黄/黑）
-        grade: gradeFromVerdict(aiResult.verdict),
-
+        verdict: finalVerdict,
+        grade: finalGrade,
         analysis: aiResult.analysis,
         risk_tags: aiResult.risk_tags,
         triggers: aiResult.triggers,
