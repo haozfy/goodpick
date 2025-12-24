@@ -129,16 +129,22 @@ export default function AccountPage() {
               <div className="mt-6 space-y-3">
                 {/* 年付 */}
                 <button
+                  type="button"
                   onClick={() => handleUpgrade("year")}
                   disabled={loading}
                   className="w-full flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-black text-emerald-600 shadow-sm active:scale-95 disabled:opacity-70"
                 >
-                  {loading ? <Loader2 className="animate-spin" size={16} /> : <CreditCard size={16} />}
+                  {loading ? (
+                    <Loader2 className="animate-spin" size={16} />
+                  ) : (
+                    <CreditCard size={16} />
+                  )}
                   $39.99 / year · Best value
                 </button>
 
                 {/* 月付 */}
                 <button
+                  type="button"
                   onClick={() => handleUpgrade("month")}
                   disabled={loading}
                   className="w-full flex items-center justify-center rounded-xl bg-white/80 px-5 py-2 text-xs font-bold text-emerald-700 ring-1 ring-white/60 hover:bg-white active:scale-95 disabled:opacity-70"
@@ -146,9 +152,10 @@ export default function AccountPage() {
                   $7.99 / month
                 </button>
 
-                {/* ✅ 新增：合规小字 */}
-                <p className="text-center text-[11px] text-white/80 leading-snug">
-                  Subscriptions can be canceled anytime. No refunds for current billing periods.
+                {/* ✅ 合规小字（更小一点） */}
+                <p className="text-center text-[10px] text-white/80 leading-snug">
+                  Subscriptions can be canceled anytime. No refunds for current
+                  billing periods.
                 </p>
               </div>
             )}
@@ -163,15 +170,18 @@ export default function AccountPage() {
         {/* 设置 */}
         <div className="overflow-hidden rounded-[24px] bg-white shadow-sm ring-1 ring-neutral-100">
           <button
+            type="button"
             onClick={() => router.push("/account/settings")}
             className="flex w-full items-center justify-between border-b border-neutral-50 p-5 hover:bg-neutral-50"
           >
             <div className="flex items-center gap-3">
               <Settings size={20} className="text-neutral-400" />
-              <div>
-                <div className="font-medium text-neutral-900">App Settings</div>
+              <div className="text-left">
+                <div className="font-medium text-neutral-900">
+                  Personal Settings
+                </div>
                 <div className="text-xs text-neutral-500">
-                  Diet preferences (low sodium, low sugar, no sweeteners…)
+                  Customize how we evaluate food for you
                 </div>
               </div>
             </div>
@@ -180,6 +190,7 @@ export default function AccountPage() {
 
           {user.isPro && (
             <button
+              type="button"
               onClick={handleManageSubscription}
               disabled={portalLoading}
               className="flex w-full items-center justify-between border-b border-neutral-50 p-5 hover:bg-neutral-50 disabled:opacity-50"
@@ -190,13 +201,16 @@ export default function AccountPage() {
                 ) : (
                   <CreditCard size={20} className="text-neutral-400" />
                 )}
-                <span className="font-medium text-neutral-900">Manage Subscription</span>
+                <span className="font-medium text-neutral-900">
+                  Manage Subscription
+                </span>
               </div>
               <ChevronRight size={20} className="text-neutral-300" />
             </button>
           )}
 
           <button
+            type="button"
             onClick={handleSignOut}
             className="flex w-full items-center justify-between p-5 hover:bg-rose-50 text-rose-600"
           >
