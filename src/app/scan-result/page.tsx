@@ -113,39 +113,7 @@ function ResultContent() {
     run();
   }, [id]);
 
-  // Loading
-  if (loading) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-neutral-50">
-        <Loader2 className="h-10 w-10 animate-spin text-emerald-600 mb-4" />
-        <p className="text-neutral-500 font-medium animate-pulse">
-          Retrieving analysis...
-        </p>
-      </div>
-    );
-  }
-
-  // Not found
-  if (!data) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-neutral-50 px-6 text-center">
-        <div className="rounded-full bg-neutral-100 p-4 mb-4">
-          <ScanLine className="h-8 w-8 text-neutral-400" />
-        </div>
-        <h2 className="text-xl font-bold text-neutral-900">Scan not found</h2>
-        <p className="mt-2 text-neutral-500 mb-8">
-          We couldn't find the analysis results for this item.
-        </p>
-        <Link
-          href="/"
-          className="rounded-xl bg-neutral-900 px-6 py-3 text-white font-bold"
-        >
-          Scan Again
-        </Link>
-      </div>
-    );
-  }
-
+  // ✅ 关键：所有 hooks / memo 都必须在任何 return 之前执行
   const grade = useMemo(() => gradeFromData(data), [data]);
   const score = Number(data?.score ?? 0);
   const productName = data?.product_name || "Unknown Product";
@@ -199,10 +167,41 @@ function ResultContent() {
 
   const showAlternatives = grade !== "green";
 
+  // Loading
+  if (loading) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-neutral-50">
+        <Loader2 className="h-10 w-10 animate-spin text-emerald-600 mb-4" />
+        <p className="text-neutral-500 font-medium animate-pulse">
+          Retrieving analysis...
+        </p>
+      </div>
+    );
+  }
+
+  // Not found
+  if (!data) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-neutral-50 px-6 text-center">
+        <div className="rounded-full bg-neutral-100 p-4 mb-4">
+          <ScanLine className="h-8 w-8 text-neutral-400" />
+        </div>
+        <h2 className="text-xl font-bold text-neutral-900">Scan not found</h2>
+        <p className="mt-2 text-neutral-500 mb-8">
+          We couldn't find the analysis results for this item.
+        </p>
+        <Link
+          href="/"
+          className="rounded-xl bg-neutral-900 px-6 py-3 text-white font-bold"
+        >
+          Scan Again
+        </Link>
+      </div>
+    );
+  }
+
   return (
-    <div
-      className={`min-h-screen ${theme.bg} px-6 py-8 transition-colors duration-500`}
-    >
+    <div className={`min-h-screen ${theme.bg} px-6 py-8 transition-colors duration-500`}>
       {/* Top nav */}
       <div className="mb-8 flex items-center justify-between">
         <Link href="/" className={`rounded-full p-2 transition-colors ${theme.backBtn}`}>
@@ -225,9 +224,7 @@ function ResultContent() {
           <div className="relative">
             <div className={`h-40 w-40 rounded-full border-[10px] ${theme.ringBg}`} />
             <div className={`absolute inset-0 rounded-full border-[10px] ${theme.ringFg}`} />
-            <div
-              className={`absolute inset-0 flex items-center justify-center text-6xl font-black ${theme.text}`}
-            >
+            <div className={`absolute inset-0 flex items-center justify-center text-6xl font-black ${theme.text}`}>
               {Number.isFinite(score) ? score : 0}
             </div>
           </div>
@@ -240,9 +237,7 @@ function ResultContent() {
 
         {/* Badge */}
         <div className="mb-8 flex justify-center">
-          <span
-            className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-wide ${theme.badge}`}
-          >
+          <span className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-wide ${theme.badge}`}>
             {theme.icon}
             {theme.gradeText}
           </span>
@@ -256,7 +251,6 @@ function ResultContent() {
         {/* CTA */}
         {showAlternatives ? (
           <div className="space-y-3">
-            {/* 这里 originId 没有就别带，避免 eq.null */}
             <Link
               href={id ? `/recs?originId=${id}` : "/recs"}
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-4 font-bold text-white shadow-lg shadow-emerald-900/15 transition-transform active:scale-95 hover:bg-emerald-500"
