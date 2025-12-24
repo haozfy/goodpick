@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Loader2, Mail, Lock, ArrowRight } from "lucide-react";
 
 export default function LoginPage() {
@@ -11,17 +11,18 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string>("");
 
   const router = useRouter();
-  const searchParams = useSearchParams();
   const supabase = createClient();
 
-  // ✅ 通用 redirect：谁送我来，我送回去；没有就去 /account
-  const redirectTo = searchParams.get("redirect") || "/account";
+  const ACCOUNT_PATH = "/account";
 
-  // --- 1) 邮箱/密码 登录与注册 ---
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
+
+    setErrorMsg("");
     setLoading(true);
 
     try {
@@ -30,11 +31,14 @@ export default function LoginPage() {
           email,
           password,
           options: {
+            // ✅ 你原来就对：邮箱确认链接回来走 callback
             emailRedirectTo: `${location.origin}/auth/callback`,
           },
         });
         if (error) throw error;
-        alert("Success! Check your email for the confirmation link.");
+
+        // ✅ 比 alert 更温和：先给明确提示
+        setErrorMsg("✅ Success! Check your email to confirm your account.");
       } else {
         const { error } = await supabase.auth.signInWithPassword({
           email,
@@ -42,33 +46,38 @@ export default function LoginPage() {
         });
         if (error) throw error;
 
-        // ✅ 登录成功回跳 redirectTo
-        router.replace(redirectTo);
+        // ✅ 用 replace：避免登录后按返回又回到 /login
+        router.replace(ACCOUNT_PATH);
         router.refresh();
       }
     } catch (error: any) {
-      alert(error.message);
+      setErrorMsg(error?.message || "Login failed. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
-  // --- 2) Google 登录逻辑 ---
   const handleGoogleLogin = async () => {
+    if (loading) return;
+
+    setErrorMsg("");
     setLoading(true);
+
     try {
+      const next = encodeURIComponent(ACCOUNT_PATH);
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          // ✅ 把 redirectTo 交给 /auth/callback 的 next 参数
-          redirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(
-            redirectTo
-          )}`,
+          // ✅ 仍回 /account（不搞 redirect 参数，不引入 useSearchParams）
+          redirectTo: `${location.origin}/auth/callback?next=${next}`,
         },
       });
+
       if (error) throw error;
+      // OAuth 会跳走，这里不需要 setLoading(false)
     } catch (error: any) {
-      alert(error.message);
+      setErrorMsg(error?.message || "Google login failed. Please try again.");
       setLoading(false);
     }
   };
@@ -87,12 +96,19 @@ export default function LoginPage() {
           </p>
         </div>
 
+        {/* 错误 / 提示 */}
+        {errorMsg ? (
+          <div className="mb-4 rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-700">
+            {errorMsg}
+          </div>
+        ) : null}
+
         {/* --- Google 登录按钮 --- */}
         <button
           type="button"
           onClick={handleGoogleLogin}
           disabled={loading}
-          className="mb-6 flex w-full items-center justify-center gap-3 rounded-xl border border-neutral-200 bg-white py-3.5 font-bold text-neutral-700 hover:bg-neutral-50 hover:border-neutral-300 transition-all active:scale-95"
+          className="mb-6 flex w-full items-center justify-center gap-3 rounded-xl border border-neutral-200 bg-white py-3.5 font-bold text-neutral-700 hover:bg-neutral-50 hover:border-neutral-300 transition-all active:scale-95 disabled:opacity-70"
         >
           <svg className="h-5 w-5" viewBox="0 0 24 24">
             <path
@@ -138,10 +154,12 @@ export default function LoginPage() {
                 placeholder="Email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-xl border border-neutral-200 bg-white py-3 pl-10 pr-4 text-neutral-900 placeholder:text-neutral-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                disabled={loading}
+                className="w-full rounded-xl border border-neutral-200 bg-white py-3 pl-10 pr-4 text-neutral-900 placeholder:text-neutral-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-70"
                 required
               />
             </div>
+
             <div className="relative">
               <Lock
                 className="absolute left-3 top-3.5 text-neutral-400"
@@ -152,7 +170,8 @@ export default function LoginPage() {
                 placeholder="Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-xl border border-neutral-200 bg-white py-3 pl-10 pr-4 text-neutral-900 placeholder:text-neutral-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                disabled={loading}
+                className="w-full rounded-xl border border-neutral-200 bg-white py-3 pl-10 pr-4 text-neutral-900 placeholder:text-neutral-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-70"
                 required
                 minLength={6}
               />
@@ -177,7 +196,12 @@ export default function LoginPage() {
 
         <div className="mt-8 text-center">
           <button
-            onClick={() => setIsSignUp(!isSignUp)}
+            type="button"
+            onClick={() => {
+              if (loading) return;
+              setErrorMsg("");
+              setIsSignUp(!isSignUp);
+            }}
             className="text-sm font-medium text-neutral-500 hover:text-emerald-600"
           >
             {isSignUp
