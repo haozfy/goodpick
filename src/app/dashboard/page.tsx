@@ -42,44 +42,62 @@ export default function DashboardPage() {
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const load = useCallback(async (d = days) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/insights?days=${d}&limit=120`, { cache: "no-store" });
-      if (!res.ok) {
+  // ✅ NEW: distinguish “not logged in / not authorized” from “no scans”
+  const [isUnauthorized, setIsUnauthorized] = useState(false);
+
+  const load = useCallback(
+    async (d = days) => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/insights?days=${d}&limit=120`, {
+          cache: "no-store",
+        });
+
+        if (!res.ok) {
+          // ✅ NEW: show preview unlock when unauthorized
+          if (res.status === 401 || res.status === 403) {
+            setIsUnauthorized(true);
+          } else {
+            setIsUnauthorized(false);
+          }
+          setScans([]);
+          return;
+        }
+
+        setIsUnauthorized(false);
+
+        const data = await res.json();
+        const rows: ScanRowFromAPI[] = Array.isArray(data?.scans) ? data.scans : [];
+
+        const mapped: ScanRecord[] = rows.map((r) => {
+          const verdict = (r.verdict ?? r.result) as ScanResult | undefined;
+          const fallback: ScanResult =
+            verdict === "good" || verdict === "caution" || verdict === "avoid"
+              ? verdict
+              : r.grade === "green"
+              ? "good"
+              : "avoid";
+
+          return {
+            id: r.id,
+            createdAt: r.created_at,
+            productName: r.product_name ?? undefined,
+            result: fallback,
+            riskTags: Array.isArray(r.risk_tags) ? r.risk_tags : [],
+            score: typeof r.score === "number" ? r.score : undefined,
+          };
+        });
+
+        setScans(mapped);
+      } catch {
         setScans([]);
-        return;
+      } finally {
+        setLoading(false);
+        setLoaded(true);
       }
-      const data = await res.json();
-      const rows: ScanRowFromAPI[] = Array.isArray(data?.scans) ? data.scans : [];
-
-      const mapped: ScanRecord[] = rows.map((r) => {
-        const verdict = (r.verdict ?? r.result) as ScanResult | undefined;
-        const fallback: ScanResult =
-          verdict === "good" || verdict === "caution" || verdict === "avoid"
-            ? verdict
-            : r.grade === "green"
-            ? "good"
-            : "avoid";
-
-        return {
-          id: r.id,
-          createdAt: r.created_at,
-          productName: r.product_name ?? undefined,
-          result: fallback,
-          riskTags: Array.isArray(r.risk_tags) ? r.risk_tags : [],
-          score: typeof r.score === "number" ? r.score : undefined,
-        };
-      });
-
-      setScans(mapped);
-    } catch {
-      setScans([]);
-    } finally {
-      setLoading(false);
-      setLoaded(true);
-    }
-  }, [days]);
+    },
+    [days]
+  );
 
   useEffect(() => {
     load(days);
@@ -100,7 +118,9 @@ export default function DashboardPage() {
           <div>
             <div className="inline-flex items-center gap-2 rounded-2xl bg-white px-3 py-2 shadow-sm border border-neutral-100">
               <Sparkles className="h-5 w-5 text-emerald-600" />
-              <span className="text-xs font-black tracking-[0.16em] text-neutral-800">INSIGHTS</span>
+              <span className="text-xs font-black tracking-[0.16em] text-neutral-800">
+                INSIGHTS
+              </span>
             </div>
 
             <h1 className="mt-4 text-4xl font-black text-neutral-900 tracking-tighter leading-tight">
@@ -153,6 +173,8 @@ export default function DashboardPage() {
         {/* Loading / Empty */}
         {!loaded ? (
           <SkeletonBlock />
+        ) : isUnauthorized ? (
+          <PreviewUnlockState days={days} />
         ) : scans.length === 0 ? (
           <EmptyState />
         ) : (
@@ -182,7 +204,11 @@ export default function DashboardPage() {
               {/* Mini distribution */}
               <div className="mt-5">
                 <div className="text-[11px] font-bold text-neutral-500 mb-2">Distribution</div>
-                <Bars good={insights.counts.good} caution={insights.counts.caution} avoid={insights.counts.avoid} />
+                <Bars
+                  good={insights.counts.good}
+                  caution={insights.counts.caution}
+                  avoid={insights.counts.avoid}
+                />
               </div>
             </div>
 
@@ -200,7 +226,9 @@ export default function DashboardPage() {
                             <TriangleAlert className="h-4 w-4 text-neutral-600" />
                           </div>
                           <div>
-                            <div className="text-sm font-bold text-neutral-900">{humanizeRiskTag(r.tag)}</div>
+                            <div className="text-sm font-bold text-neutral-900">
+                              {humanizeRiskTag(r.tag)}
+                            </div>
                             <div className="text-xs text-neutral-500">shows up in your scans</div>
                           </div>
                         </div>
@@ -243,7 +271,9 @@ export default function DashboardPage() {
             {/* Recent activity (small) */}
             <div className="mt-6">
               <div className="flex items-center justify-between px-1">
-                <div className="text-sm font-black text-neutral-800 tracking-tight">Recent scans</div>
+                <div className="text-sm font-black text-neutral-800 tracking-tight">
+                  Recent scans
+                </div>
                 <span className="text-xs font-bold text-neutral-500">{days} days window</span>
               </div>
 
@@ -294,7 +324,11 @@ function Pill({
     <button
       onClick={onClick}
       className={`inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-black shadow-sm border transition active:scale-95
-        ${active ? "bg-neutral-900 text-white border-neutral-900" : "bg-white text-neutral-800 border-neutral-200 hover:bg-neutral-50"}`}
+        ${
+          active
+            ? "bg-neutral-900 text-white border-neutral-900"
+            : "bg-white text-neutral-800 border-neutral-200 hover:bg-neutral-50"
+        }`}
     >
       {icon}
       {label}
@@ -302,11 +336,21 @@ function Pill({
   );
 }
 
-function Card({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+function Card({
+  title,
+  icon,
+  children,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
       <div className="flex items-center gap-2">
-        <div className="h-9 w-9 rounded-2xl bg-neutral-100 flex items-center justify-center">{icon}</div>
+        <div className="h-9 w-9 rounded-2xl bg-neutral-100 flex items-center justify-center">
+          {icon}
+        </div>
         <div className="text-sm font-black text-neutral-900">{title}</div>
       </div>
       <div className="mt-4">{children}</div>
@@ -317,7 +361,9 @@ function Card({ title, icon, children }: { title: string; icon: React.ReactNode;
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
-      <div className="text-[11px] font-black tracking-[0.14em] text-neutral-500">{label}</div>
+      <div className="text-[11px] font-black tracking-[0.14em] text-neutral-500">
+        {label}
+      </div>
       <div className="mt-1 text-sm font-black text-neutral-900 truncate">{value}</div>
     </div>
   );
@@ -327,12 +373,24 @@ function Badge({ verdict }: { verdict: ScanResult }) {
   const base =
     "inline-flex items-center rounded-full px-3 py-1 text-xs font-black shadow-sm border";
   if (verdict === "good") {
-    return <span className={`${base} bg-emerald-100 text-emerald-800 border-emerald-200`}>GOOD</span>;
+    return (
+      <span className={`${base} bg-emerald-100 text-emerald-800 border-emerald-200`}>
+        GOOD
+      </span>
+    );
   }
   if (verdict === "caution") {
-    return <span className={`${base} bg-amber-100 text-amber-900 border-amber-200`}>CAUTION</span>;
+    return (
+      <span className={`${base} bg-amber-100 text-amber-900 border-amber-200`}>
+        CAUTION
+      </span>
+    );
   }
-  return <span className={`${base} bg-neutral-900 text-white border-neutral-900`}>AVOID</span>;
+  return (
+    <span className={`${base} bg-neutral-900 text-white border-neutral-900`}>
+      AVOID
+    </span>
+  );
 }
 
 function ScorePill({ score, verdict }: { score?: number; verdict: ScanResult }) {
@@ -343,7 +401,9 @@ function ScorePill({ score, verdict }: { score?: number; verdict: ScanResult }) 
       ? "bg-amber-400 text-amber-950"
       : "bg-neutral-900";
   return (
-    <div className={`flex h-12 w-12 items-center justify-center rounded-full text-lg font-black text-white ${bg}`}>
+    <div
+      className={`flex h-12 w-12 items-center justify-center rounded-full text-lg font-black text-white ${bg}`}
+    >
       {typeof score === "number" ? score : "—"}
     </div>
   );
@@ -405,6 +465,84 @@ function EmptyState() {
           >
             Start scanning <ChevronRight className="ml-1 h-4 w-4" />
           </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ✅ NEW: Login-before preview that actually sells the value */
+function PreviewUnlockState({ days }: { days: number }) {
+  return (
+    <div className="mt-6 space-y-4">
+      <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 h-10 w-10 rounded-2xl bg-neutral-100 flex items-center justify-center">
+            <Sparkles className="h-5 w-5 text-emerald-600" />
+          </div>
+
+          <div className="flex-1">
+            <div className="text-lg font-black text-neutral-900">
+              Your food patterns (preview)
+            </div>
+
+            <div className="mt-1 text-sm text-neutral-600 leading-relaxed">
+              With an account, we summarize your last {days} days into:
+            </div>
+
+            <ul className="mt-3 space-y-2 text-sm text-neutral-800">
+              <li>• Sugar & additive exposure trends</li>
+              <li>• Repeated “avoid” signals you keep hitting</li>
+              <li>• One simple next decision (no nutrition-report vibe)</li>
+            </ul>
+
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Link
+                href="/login"
+                className="inline-flex items-center justify-center rounded-2xl bg-neutral-900 px-4 py-2.5 text-sm font-black text-white shadow-sm transition active:scale-95"
+              >
+                Unlock insights <ChevronRight className="ml-1 h-4 w-4" />
+              </Link>
+
+              <Link
+                href="/pricing"
+                className="inline-flex items-center justify-center rounded-2xl border border-neutral-200 bg-white px-4 py-2.5 text-sm font-black text-neutral-900 shadow-sm hover:bg-neutral-50 transition active:scale-95"
+              >
+                Go Pro <span className="ml-2 text-xs text-neutral-500 font-bold">Unlimited + trends</span>
+              </Link>
+            </div>
+
+            <div className="mt-3 text-[11px] text-neutral-400">
+              Save history, see longer-term trends, and get smarter recommendations.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4">
+        <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
+          <div className="text-sm font-black text-neutral-900">Example signals you’ll track</div>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs font-bold text-neutral-700">
+            <div className="rounded-2xl bg-neutral-50 border border-neutral-200 px-3 py-2">
+              Added sugar
+            </div>
+            <div className="rounded-2xl bg-neutral-50 border border-neutral-200 px-3 py-2">
+              Many additives
+            </div>
+            <div className="rounded-2xl bg-neutral-50 border border-neutral-200 px-3 py-2">
+              High sodium
+            </div>
+            <div className="rounded-2xl bg-neutral-50 border border-neutral-200 px-3 py-2">
+              Ultra-processed
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
+          <div className="text-sm font-black text-neutral-900">Why this matters</div>
+          <div className="mt-2 text-sm text-neutral-600">
+            We don’t explain labels. We judge them — and show what you keep running into.
+          </div>
         </div>
       </div>
     </div>
