@@ -2,7 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, ChevronRight, Sparkles, ShieldCheck, Ban, TriangleAlert } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronRight,
+  Sparkles,
+  ShieldCheck,
+  Ban,
+  TriangleAlert,
+  Lock,
+  Crown,
+} from "lucide-react";
 
 type Verdict = "good" | "caution" | "avoid";
 type RecItem = { name: string; reason: string; price?: string };
@@ -29,6 +38,9 @@ export default function RecsClient() {
   // ✅ 新增：从 /api/recs 返回的用户偏好标签
   const [prefLabels, setPrefLabels] = useState<string[]>([]);
 
+  // ✅ NEW: unauthorized gating
+  const [isUnauthorized, setIsUnauthorized] = useState(false);
+
   // 1) 初始化 scanId：URL 优先，否则取 last-scan
   useEffect(() => {
     let cancelled = false;
@@ -48,16 +60,31 @@ export default function RecsClient() {
         const data = await res.json();
 
         if (!res.ok) {
+          // ✅ NEW: if unauthorized, show preview unlock
+          if (res.status === 401 || res.status === 403) {
+            if (!cancelled) {
+              setIsUnauthorized(true);
+              setScanId(null);
+              setError("");
+            }
+            return;
+          }
+
           if (!cancelled) {
+            setIsUnauthorized(false);
             setScanId(null);
             setError(data?.error || "No scans yet.");
           }
           return;
         }
 
-        if (!cancelled) setScanId(data.scan.id);
+        if (!cancelled) {
+          setIsUnauthorized(false);
+          setScanId(data.scan.id);
+        }
       } catch (e: any) {
         if (!cancelled) {
+          setIsUnauthorized(false);
           setScanId(null);
           setError(e?.message || "Failed to load your latest scan.");
         }
@@ -82,11 +109,26 @@ export default function RecsClient() {
         setRecsLoading(true);
         setError("");
 
-        const res = await fetch(`/api/recs?scanId=${encodeURIComponent(scanId)}`, { cache: "no-store" });
+        const res = await fetch(`/api/recs?scanId=${encodeURIComponent(scanId)}`, {
+          cache: "no-store",
+        });
         const data = await res.json();
 
-        if (!res.ok) throw new Error(data?.error || "Failed to load recs.");
+        if (!res.ok) {
+          // ✅ NEW: unauthorized -> preview unlock
+          if (res.status === 401 || res.status === 403) {
+            if (!cancelled) {
+              setIsUnauthorized(true);
+              setError("");
+            }
+            return;
+          }
+          throw new Error(data?.error || "Failed to load recs.");
+        }
+
         if (cancelled) return;
+
+        setIsUnauthorized(false);
 
         setVerdict((data.verdict as Verdict) || "good");
         setAnalysis(data.analysis || "");
@@ -124,7 +166,12 @@ export default function RecsClient() {
     );
   }
 
-  // ✅ 没扫过 / 没登录 / last-scan 失败
+  // ✅ NEW: not logged in / unauthorized -> show selling preview
+  if (isUnauthorized) {
+    return <PreviewUnlockState onLogin={() => router.push("/login")} onPro={() => router.push("/pricing")} />;
+  }
+
+  // ✅ 没扫过 / last-scan 失败
   if (!scanId) {
     return (
       <Shell>
@@ -144,8 +191,12 @@ export default function RecsClient() {
           <div className="mt-2 text-xs text-neutral-500">scanId: {scanId}</div>
         </Card>
         <Row>
-          <Ghost onClick={() => router.back()}><ArrowLeft size={14}/> Back</Ghost>
-          <Primary onClick={() => router.push("/")}>Scan another <ChevronRight size={14}/></Primary>
+          <Ghost onClick={() => router.back()}>
+            <ArrowLeft size={14} /> Back
+          </Ghost>
+          <Primary onClick={() => router.push("/")}>
+            Scan another <ChevronRight size={14} />
+          </Primary>
         </Row>
       </Shell>
     );
@@ -157,8 +208,12 @@ export default function RecsClient() {
       <Shell>
         <Title title="Good choice 👍" sub="No swaps needed. Keep going." />
         <Row>
-          <Ghost onClick={() => router.back()}><ArrowLeft size={14}/> Back</Ghost>
-          <Primary onClick={() => router.push("/")}>Scan another <ChevronRight size={14}/></Primary>
+          <Ghost onClick={() => router.back()}>
+            <ArrowLeft size={14} /> Back
+          </Ghost>
+          <Primary onClick={() => router.push("/")}>
+            Scan another <ChevronRight size={14} />
+          </Primary>
         </Row>
       </Shell>
     );
@@ -200,13 +255,6 @@ export default function RecsClient() {
       <div className="mt-6">
         <div className="text-sm font-black text-neutral-900">Cleaner alternatives</div>
 
-        {/* ✅ 如果你更想把 personalized 放到这里也可以（现在在 header 里） */}
-        {/* {prefLabels.length ? (
-          <div className="mt-1 text-xs text-neutral-500">
-            Personalized for: {prefLabels.join(" · ")}
-          </div>
-        ) : null} */}
-
         <div className="mt-3 space-y-4">
           {(items.length ? items : fallbackRecs(verdict)).slice(0, 3).map((it, idx) => (
             <div key={idx} className="rounded-[24px] bg-white p-5 shadow-sm ring-1 ring-neutral-100">
@@ -236,9 +284,106 @@ export default function RecsClient() {
       </div>
 
       <Row>
-        <Ghost onClick={() => router.back()}><ArrowLeft size={14}/> Back</Ghost>
-        <Primary onClick={() => router.push("/")}>Scan another <ChevronRight size={14}/></Primary>
+        <Ghost onClick={() => router.back()}>
+          <ArrowLeft size={14} /> Back
+        </Ghost>
+        <Primary onClick={() => router.push("/")}>
+          Scan another <ChevronRight size={14} />
+        </Primary>
       </Row>
+
+      <div className="h-10" />
+    </Shell>
+  );
+}
+
+/* ---------- NEW: Preview unlock state (no auth) ---------- */
+
+function PreviewUnlockState({
+  onLogin,
+  onPro,
+}: {
+  onLogin: () => void;
+  onPro: () => void;
+}) {
+  return (
+    <Shell>
+      <div className="relative overflow-hidden rounded-[28px] bg-neutral-900 p-6 text-white shadow-lg">
+        <div className="relative z-10">
+          <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-black">
+            <Lock size={14} className="text-white/80" />
+            Recommendations locked
+          </div>
+
+          <div className="mt-4 text-2xl font-black leading-tight">
+            Unlock cleaner swaps for what you actually buy.
+          </div>
+
+          <div className="mt-3 text-sm text-white/80">
+            Save your scans, get personalized alternatives, and see what you keep running into
+            (sugar · additives · sodium · ultra-processed).
+          </div>
+
+          <div className="mt-5 flex items-center gap-2">
+            <button
+              onClick={onLogin}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-2.5 text-sm font-black text-neutral-900 shadow-sm active:scale-95 transition-transform"
+            >
+              Unlock swaps <ChevronRight size={16} />
+            </button>
+
+            <button
+              onClick={onPro}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 px-4 py-2.5 text-sm font-black text-white ring-1 ring-white/15 active:scale-95 transition-transform"
+            >
+              <Crown size={16} className="text-yellow-300" />
+              Go Pro
+            </button>
+          </div>
+
+          <div className="mt-3 text-[11px] text-white/60">
+            Pro = unlimited scans + better recs + trend insights.
+          </div>
+        </div>
+
+        <div className="absolute -top-16 -right-16 h-48 w-48 rounded-full bg-emerald-400/20 blur-3xl" />
+        <div className="absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-teal-400/10 blur-3xl" />
+      </div>
+
+      <div className="mt-6">
+        <div className="text-sm font-black text-neutral-900">What you’ll get</div>
+
+        <div className="mt-3 space-y-4">
+          {[
+            {
+              title: "Smarter swaps",
+              desc: "Cleaner options in the same category — not random “healthy food” lists.",
+            },
+            {
+              title: "Personalized filters",
+              desc: "Match your preferences (low sugar, low sodium, fewer additives…).",
+            },
+            {
+              title: "Faster decisions",
+              desc: "A clear verdict + one next step. No nutrition-report vibe.",
+            },
+          ].map((x) => (
+            <div key={x.title} className="rounded-[24px] bg-white p-5 shadow-sm ring-1 ring-neutral-100">
+              <div className="font-black text-neutral-900">{x.title}</div>
+              <div className="mt-1 text-sm text-neutral-600">{x.desc}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-8 flex justify-between">
+          <Ghost onClick={() => onLogin()}>
+            Unlock now <ChevronRight size={14} />
+          </Ghost>
+          <Primary onClick={() => (window.location.href = "/")}>
+            Go scan <ChevronRight size={14} />
+          </Primary>
+        </div>
+      </div>
 
       <div className="h-10" />
     </Shell>
@@ -265,7 +410,11 @@ function Title({ title, sub }: { title: string; sub?: string }) {
 }
 
 function Card({ children }: { children: React.ReactNode }) {
-  return <div className="mt-6 rounded-[24px] bg-white p-5 shadow-sm ring-1 ring-neutral-100">{children}</div>;
+  return (
+    <div className="mt-6 rounded-[24px] bg-white p-5 shadow-sm ring-1 ring-neutral-100">
+      {children}
+    </div>
+  );
 }
 
 function Row({ children }: { children: React.ReactNode }) {
@@ -302,7 +451,8 @@ function Pill({ verdict }: { verdict: Verdict }) {
 
   return (
     <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-black ring-1 ${cfg.cls}`}>
-      {cfg.icon}{cfg.text}
+      {cfg.icon}
+      {cfg.text}
     </span>
   );
 }
