@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, Suspense } from "react";
+import { useEffect, useState, Suspense, useMemo, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -11,6 +11,8 @@ import {
   ShieldAlert,
   Loader2,
   ScanLine,
+  Share2,
+  Download,
 } from "lucide-react";
 
 const ANON_KEY = "goodpick_anon_id";
@@ -65,9 +67,12 @@ function ResultContent() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // ✅ 分开状态，避免 Share / Download 互相抢文案
+  // ✅ 分开：Share/Download 提示互不抢
   const [shareMsg, setShareMsg] = useState<string>("");
   const [dlMsg, setDlMsg] = useState<string>("");
+
+  // ✅ 导出态：去阴影 + 隐藏按钮区
+  const [exporting, setExporting] = useState(false);
 
   const cardRef = useRef<HTMLDivElement | null>(null);
 
@@ -84,7 +89,7 @@ function ResultContent() {
         setLoading(false);
       };
 
-      // A) 没有 id：兜底 sessionStorage
+      // A) 没有 id：兜底读 sessionStorage
       if (!id) {
         const raw =
           typeof window !== "undefined"
@@ -94,9 +99,10 @@ function ResultContent() {
         return;
       }
 
+      // B) 有 id：查 Supabase
       const supabase = createClient();
 
-      // 1) 登录用户：id + user_id
+      // 1) 登录：按 id + user_id 查
       const { data: auth } = await supabase.auth.getUser();
       const user = auth?.user ?? null;
 
@@ -114,8 +120,9 @@ function ResultContent() {
         }
       }
 
-      // 2) 匿名：id + anon_id
+      // 2) 匿名兜底：按 id + anon_id 查
       const anonId = getOrCreateAnonId();
+
       if (anonId) {
         const { data: anonScan, error: anonErr } = await supabase
           .from("scans")
@@ -130,7 +137,7 @@ function ResultContent() {
         }
       }
 
-      // 3) Public fallback：RPC
+      // 3) Public fallback（分享给别人/微信打开）
       try {
         const { data: pub, error: pubErr } = await supabase.rpc(
           "get_scan_public",
@@ -144,20 +151,23 @@ function ResultContent() {
         // ignore
       }
 
-      // 4) 最后兜底：sessionStorage
+      // 4) 最后兜底：再读 sessionStorage
       const raw =
         typeof window !== "undefined"
           ? sessionStorage.getItem(GUEST_KEY)
           : null;
+
       commit(safeJsonParse<any>(raw));
     };
 
     run();
+
     return () => {
       alive = false;
     };
   }, [id]);
 
+  // ✅ hooks 必须都在 return 前
   const grade = useMemo(() => gradeFromData(data), [data]);
   const score = Number(data?.score ?? 0);
   const productName = data?.product_name || "Unknown Product";
@@ -179,8 +189,7 @@ function ResultContent() {
         backBtn: "bg-white/10 text-white hover:bg-white/20",
         pillBtn: "bg-white/10 text-white hover:bg-white/20",
         brandText: "text-white/40 hover:text-white/70",
-        // ✅ 导出背景：黑卡就用深色，避免白底闪瞎
-        exportBg: "#111827",
+        exportBg: "#111827", // ✅ 黑卡导出背景
       };
     }
     if (grade === "yellow") {
@@ -228,6 +237,7 @@ function ResultContent() {
 
       const origin =
         typeof window !== "undefined" ? window.location.origin : "";
+
       if (!id || !origin) {
         setShareMsg("Nothing");
         setTimeout(() => setShareMsg(""), 1200);
@@ -235,13 +245,14 @@ function ResultContent() {
       }
 
       const shareUrl = `${origin}/scan-result?id=${encodeURIComponent(id)}`;
+
       const verdictText =
         grade === "green" ? "Good" : grade === "yellow" ? "Caution" : "Avoid";
+
       const text = `GoodPick result: ${verdictText} (${
         Number.isFinite(score) ? score : 0
       }) — ${productName}`;
 
-      // 1) 系统分享
       if ((navigator as any)?.share) {
         await (navigator as any).share({
           title: "GoodPick",
@@ -253,7 +264,6 @@ function ResultContent() {
         return;
       }
 
-      // 2) 复制链接
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(shareUrl);
         setShareMsg("Copied");
@@ -261,17 +271,16 @@ function ResultContent() {
         return;
       }
 
-      // 3) 最后兜底：prompt
       window.prompt("Copy link:", shareUrl);
       setShareMsg("Copy");
       setTimeout(() => setShareMsg(""), 1200);
     } catch {
-      setShareMsg("Couldn’t");
+      setShareMsg("Fail");
       setTimeout(() => setShareMsg(""), 1400);
     }
   };
 
-  // ✅ Download：最稳保存策略（iOS/微信 WebView 也尽量能落）
+  // ✅ Download：导出时去阴影 + 隐藏按钮区；iOS/微信最稳保存
   const handleDownload = async () => {
     try {
       setDlMsg("");
@@ -279,27 +288,34 @@ function ResultContent() {
       const el = cardRef.current;
       if (!el) throw new Error("no-card");
 
+      // ✅ 进入导出态：去阴影 + 隐藏 Share/Download 那行
+      setExporting(true);
+      await new Promise((r) => setTimeout(r, 60)); // 等 DOM 刷新稳定
+
       const mod = await import("html-to-image");
 
-      // ✅ iOS/微信：DataURL 往往比 blob + download 更稳
+      // ✅ 用 DataURL 比 blob 更稳（尤其微信/iOS）
       const dataUrl = await mod.toPng(el, {
         pixelRatio: 3,
         cacheBust: true,
         backgroundColor: theme.exportBg,
       });
+
+      // ✅ 立刻恢复页面态
+      setExporting(false);
+
       if (!dataUrl) throw new Error("no-dataurl");
 
-      const safeName = (productName || "result")
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .slice(0, 40);
-
-      // 1) 尝试：把 dataURL 转成 File，然后走系统分享（可“存储图像”）
-      //    但微信很多时候 canShare/files 不支持 → 会失败 → 自动走下一步
+      // 1) 试一下：转 file 走系统分享（有些 iOS 可直接“存储图像”）
       try {
         const res = await fetch(dataUrl);
         const blob = await res.blob();
+        const safeName = (productName || "result")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 40);
+
         const file = new File([blob], `goodpick-${safeName || "result"}.png`, {
           type: "image/png",
         });
@@ -315,8 +331,7 @@ function ResultContent() {
         // ignore → fallback
       }
 
-      // 2) ✅ 最稳兜底：新开窗口显示图片（iOS/微信：用户长按保存）
-      //    这能解决你截图里那种 “Save image, not found / Couldn’t save”
+      // 2) ✅ 最稳：新开窗口显示图片（微信/IOS：长按保存）
       const w = window.open();
       if (w) {
         w.document.write(`
@@ -352,17 +367,19 @@ function ResultContent() {
       // 3) 最后兜底：a.download（部分环境可用）
       const a = document.createElement("a");
       a.href = dataUrl;
-      a.download = `goodpick-${safeName || "result"}.png`;
+      a.download = "goodpick-result.png";
       a.click();
 
       setDlMsg("Downloaded");
       setTimeout(() => setDlMsg(""), 1200);
     } catch {
+      setExporting(false);
       setDlMsg("Couldn’t");
       setTimeout(() => setDlMsg(""), 1400);
     }
   };
 
+  // Loading
   if (loading) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-neutral-50">
@@ -374,6 +391,7 @@ function ResultContent() {
     );
   }
 
+  // Not found
   if (!data) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-neutral-50 px-6 text-center">
@@ -419,7 +437,11 @@ function ResultContent() {
       {/* Card */}
       <div
         ref={cardRef}
-        className={`relative z-10 mx-auto w-full max-w-sm rounded-[2rem] ${theme.cardBg} p-8 shadow-2xl transition-all duration-500`}
+        className={`relative z-10 mx-auto w-full max-w-sm rounded-[2rem] ${
+          theme.cardBg
+        } p-8 transition-all duration-500 ${
+          exporting ? "shadow-none" : "shadow-2xl"
+        }`}
       >
         {/* Score ring */}
         <div className="mb-8 flex justify-center">
@@ -462,8 +484,12 @@ function ResultContent() {
           {analysis}
         </div>
 
-        {/* Brand + Share/Download */}
-        <div className="mb-10 flex items-center justify-between">
+        {/* ✅ Brand + Actions: 导出时隐藏；并且 icon-only（去掉 Share/Download 字） */}
+        <div
+          className={`mb-10 flex items-center justify-between ${
+            exporting ? "hidden" : ""
+          }`}
+        >
           <a
             href="https://goodpick.app"
             target="_blank"
@@ -477,17 +503,25 @@ function ResultContent() {
             <button
               type="button"
               onClick={handleShare}
-              className={`rounded-full px-3 py-1.5 text-[11px] font-black tracking-wide transition-colors ${theme.pillBtn}`}
+              className={`rounded-full px-3 py-2 text-[11px] font-black tracking-wide transition-colors ${theme.pillBtn}`}
+              aria-label="Share"
+              title="Share"
             >
-              {shareMsg ? shareMsg : "Share"}
+              {shareMsg ? (
+                <span>{shareMsg}</span>
+              ) : (
+                <Share2 size={14} />
+              )}
             </button>
 
             <button
               type="button"
               onClick={handleDownload}
-              className={`rounded-full px-3 py-1.5 text-[11px] font-black tracking-wide transition-colors ${theme.pillBtn}`}
+              className={`rounded-full px-3 py-2 text-[11px] font-black tracking-wide transition-colors ${theme.pillBtn}`}
+              aria-label="Download"
+              title="Download"
             >
-              {dlMsg ? dlMsg : "Download"}
+              {dlMsg ? <span>{dlMsg}</span> : <Download size={14} />}
             </button>
           </div>
         </div>
