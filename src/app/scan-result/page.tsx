@@ -31,10 +31,16 @@ function safeJsonParse<T>(raw: string | null): T | null {
 }
 
 function getOrCreateAnonId() {
-  if (typeof window === "undefined") return null reminded;
+  if (typeof window === "undefined") return null;
+
   let id = localStorage.getItem(ANON_KEY);
   if (!id) {
-    id = crypto.randomUUID();
+    // ✅ 稳一点：极少数环境没有 crypto.randomUUID()
+    id =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
     localStorage.setItem(ANON_KEY, id);
   }
   return id;
@@ -330,7 +336,7 @@ function ResultContent() {
   // ✅ Download：
   // - 导出态：去阴影 + 隐藏按钮，但保留 goodpick.app
   // - 电脑端：blob + a.download（避免白纸/黑纸）
-  // - 手机端：优先 share(files)； reminding不支持就预览页长按保存
+  // - 手机端：优先 share(files)；不支持就预览页长按保存
   const handleDownload = async () => {
     let blobUrl: string | null = null;
 
@@ -399,7 +405,6 @@ function ResultContent() {
       }
 
       // ✅ blob 失败：退回 dataUrl
-      //（某些环境 blob 会返回 null）
       const dataUrl = await mod.toPng(el, {
         pixelRatio: 3,
         cacheBust: true,
