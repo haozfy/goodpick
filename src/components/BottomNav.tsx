@@ -3,53 +3,123 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Search, Clock, User, ArrowRightLeft } from "lucide-react";
+import {
+  ScanLine,
+  Sparkles,
+  LineChart,
+  UserCircle2,
+} from "lucide-react";
+
+type Item = {
+  href: string;
+  label: string;
+  icon: React.ReactNode;
+  match: (pathname: string) => boolean;
+  primary?: boolean;
+};
 
 export default function BottomNav() {
   const pathname = usePathname();
 
-  // 判断链接是否激活的辅助函数
-  const isActive = (path: string) => pathname === path;
+  const items: Item[] = [
+    {
+      href: "/",
+      label: "Scan",
+      icon: <ScanLine className="h-[22px] w-[22px]" />,
+      match: (p) => p === "/",
+      primary: true,
+    },
+    {
+      href: "/recs",
+      label: "Recs",
+      icon: <Sparkles className="h-[22px] w-[22px]" />,
+      match: (p) => p === "/recs" || p.startsWith("/recs/"),
+    },
+    {
+      href: "/dashboard",
+      label: "Insight",
+      icon: <LineChart className="h-[22px] w-[22px]" />,
+      match: (p) => p === "/dashboard" || p.startsWith("/dashboard/"),
+    },
+    {
+      href: "/account",
+      label: "Account",
+      icon: <UserCircle2 className="h-[22px] w-[22px]" />,
+      match: (p) => p === "/account" || p.startsWith("/account/"),
+    },
+  ];
 
   return (
-    <nav className="fixed bottom-6 left-6 right-6 z-50">
-      <div className="flex h-16 items-center justify-around rounded-full bg-white/90 px-2 shadow-2xl ring-1 ring-neutral-200/50 backdrop-blur-lg">
-        <NavLink 
-          href="/" 
-          icon={<Search size={24} />} 
-          active={isActive("/")} 
-        />
-        <NavLink 
-          href="/recs" 
-          icon={<ArrowRightLeft size={24} />} 
-          active={isActive("/recs")} 
-        />
-        <NavLink 
-          href="/dashboard" 
-          icon={<Clock size={24} />} 
-          active={isActive("/dashboard")} 
-        />
-        <NavLink 
-          href="/account" 
-          icon={<User size={24} />} 
-          active={isActive("/account")} 
-        />
+    <nav
+      aria-label="Bottom navigation"
+      className="fixed inset-x-0 bottom-0 z-50"
+      style={{
+        paddingBottom: "calc(env(safe-area-inset-bottom) + 12px)",
+      }}
+    >
+      <div className="mx-auto max-w-md px-4">
+        <div className="rounded-[28px] bg-white/80 backdrop-blur-xl ring-1 ring-black/5 shadow-[0_10px_30px_rgba(0,0,0,0.10)]">
+          <div className="grid grid-cols-4 px-2 py-2">
+            {items.map((it) => (
+              <NavItem
+                key={it.href}
+                href={it.href}
+                label={it.label}
+                icon={it.icon}
+                active={it.match(pathname)}
+                primary={it.primary}
+              />
+            ))}
+          </div>
+        </div>
       </div>
     </nav>
   );
 }
 
-function NavLink({ href, icon, active }: { href: string; icon: React.ReactNode; active?: boolean }) {
+function NavItem({
+  href,
+  label,
+  icon,
+  active,
+  primary,
+}: {
+  href: string;
+  label: string;
+  icon: React.ReactNode;
+  active: boolean;
+  primary?: boolean;
+}) {
   return (
     <Link
       href={href}
-      className={`flex h-12 w-12 items-center justify-center rounded-full transition-all ${
-        active
-          ? "bg-neutral-900 text-white shadow-md transform scale-105"
-          : "text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600"
-      }`}
+      aria-current={active ? "page" : undefined}
+      className={[
+        "group flex flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2",
+        "transition active:scale-[0.98]", // 只给按压反馈，不做“潮UI抖动”
+        active ? "text-neutral-950" : "text-neutral-500 hover:text-neutral-700",
+      ].join(" ")}
     >
-      {icon}
+      <span
+        className={[
+          "flex items-center justify-center rounded-2xl",
+          primary ? "h-11 w-14" : "h-10 w-12",
+          active
+            ? "bg-neutral-950 text-white shadow-[0_10px_24px_rgba(0,0,0,0.22)] ring-1 ring-white/10"
+            : "bg-transparent group-hover:bg-neutral-100",
+        ].join(" ")}
+      >
+        {icon}
+      </span>
+
+      <span
+        className={[
+          "text-[11px] leading-none tracking-[0.02em]",
+          active ? "text-neutral-950" : "text-neutral-500",
+        ].join(" ")}
+      >
+        {label}
+      </span>
     </Link>
   );
 }
