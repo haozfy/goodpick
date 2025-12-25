@@ -120,7 +120,7 @@ function ResultContent() {
   const [exporting, setExporting] = useState(false);
   const cardRef = useRef<HTMLDivElement | null>(null);
 
-  // ✅ 统一 redirect 控制：避免在条件分支里调用 useEffect（会导致你现在的白屏炸掉）
+  // ✅ 只给“无 id 的本地兜底”用的 redirect 状态
   const [shouldRedirect, setShouldRedirect] = useState(false);
 
   useEffect(() => {
@@ -136,7 +136,7 @@ function ResultContent() {
         setLoading(false);
       };
 
-      // A) 没有 id：兜底读 sessionStorage
+      // A) 没有 id：兜底读 sessionStorage（仅用于“刚扫完”回来的本机）
       if (!id) {
         const raw =
           typeof window !== 'undefined' ? sessionStorage.getItem(GUEST_KEY) : null;
@@ -165,7 +165,7 @@ function ResultContent() {
         }
       }
 
-      // 2) 匿名兜底：按 id + anon_id 查
+      // 2) 匿名兜底：按 id + anon_id 查（同设备/同浏览器才会命中）
       const anonId = getOrCreateAnonId();
 
       if (anonId) {
@@ -182,7 +182,7 @@ function ResultContent() {
         }
       }
 
-      // 3) Public fallback（你建的 RPC）
+      // 3) Public fallback：RPC
       try {
         const { data: pub, error: pubErr } = await supabase.rpc('get_scan_public', {
           p_id: id,
@@ -195,7 +195,7 @@ function ResultContent() {
         // ignore
       }
 
-      // C) 最后兜底：再读 sessionStorage
+      // C) 最后兜底：再读 sessionStorage（分享场景基本不会有）
       const raw =
         typeof window !== 'undefined' ? sessionStorage.getItem(GUEST_KEY) : null;
 
@@ -209,16 +209,15 @@ function ResultContent() {
     };
   }, [id]);
 
-  // ✅ loading 完成后，如果 data 仍然为空 → 触发 redirect（hook 永远在顶层调用）
+  // ✅ 关键修复：只有“没有 id”才自动回首页；分享链接（有 id）拿不到数据就别跳
   useEffect(() => {
-    if (!loading && !data) {
+    if (!loading && !data && !id) {
       setShouldRedirect(true);
-      const t = setTimeout(() => {
-        router.replace('/');
-      }, 400);
+      const t = setTimeout(() => router.replace('/'), 400);
       return () => clearTimeout(t);
     }
-  }, [loading, data, router]);
+    setShouldRedirect(false);
+  }, [loading, data, id, router]);
 
   const grade = useMemo(() => gradeFromData(data), [data]);
   const score = Number(data?.score ?? 0);
@@ -286,16 +285,15 @@ function ResultContent() {
     try {
       setShareMsg('');
 
-      const origin =
-        typeof window !== 'undefined' ? window.location.origin : 'https://goodpick.app';
-
       if (!id) {
         setShareMsg('Nothing to share');
         setTimeout(() => setShareMsg(''), 1200);
         return;
       }
 
-      // ✅ 分享短链
+      const origin =
+        typeof window !== 'undefined' ? window.location.origin : 'https://goodpick.app';
+
       const shareUrl = `${origin}/s/${encodeURIComponent(id)}`;
 
       const verdictText =
@@ -433,32 +431,47 @@ function ResultContent() {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-neutral-50">
         <Loader2 className="h-10 w-10 animate-spin text-emerald-600 mb-4" />
-        <p className="text-neutral-500 font-medium animate-pulse">
-          Retrieving analysis...
-        </p>
+        <p className="text-neutral-500 font-medium animate-pulse">Retrieving analysis...</p>
       </div>
     );
   }
 
-  // Not found → 显示 redirect UI（跳转逻辑在上面的 useEffect 里）
+  // Not found
   if (!data) {
+    // ✅ 有 id：说明是分享/直达链接，但拿不到（没公开 / RLS 拦了 / 过期）
+    const isShareLink = !!id;
+
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-neutral-50 px-6 text-center">
         <div className="rounded-full bg-neutral-100 p-4 mb-4">
           <ScanLine className="h-8 w-8 text-neutral-400" />
         </div>
+
         <h2 className="text-xl font-bold text-neutral-900">
-          {shouldRedirect ? 'Redirecting…' : 'Not found'}
+          {isShareLink ? 'Link not available' : shouldRedirect ? 'Redirecting…' : 'Not found'}
         </h2>
+
         <p className="mt-2 text-neutral-500 mb-8">
-          We couldn&apos;t find the result. Taking you back to scan.
+          {isShareLink
+            ? "This result isn't public yet (or the link expired)."
+            : "We couldn't find the result. Taking you back to scan."}
         </p>
-        <Link
-          href="/"
-          className="rounded-xl bg-neutral-900 px-6 py-3 text-white font-bold"
-        >
-          Scan Again
-        </Link>
+
+        <div className="flex gap-3">
+          <Link href="/" className="rounded-xl bg-neutral-900 px-6 py-3 text-white font-bold">
+            Scan Again
+          </Link>
+
+          {/* ✅ 分享链接提供一个“打开 App 首页/重新扫码”的明确出口 */}
+          {isShareLink ? (
+            <Link
+              href="/"
+              className="rounded-xl bg-white px-6 py-3 text-neutral-900 font-bold border border-neutral-200"
+            >
+              Home
+            </Link>
+          ) : null}
+        </div>
       </div>
     );
   }
