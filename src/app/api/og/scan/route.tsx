@@ -1,76 +1,51 @@
+// src/app/api/og/scan/route.ts
 import { ImageResponse } from "next/og";
 
 export const runtime = "edge";
 
-function clampScore(n: any) {
-  const x = Number(n);
-  if (!Number.isFinite(x)) return 0;
-  return Math.max(0, Math.min(100, Math.round(x)));
-}
-
-function gradeTheme(grade: string) {
+function pickTheme(grade: string) {
   const g = (grade || "").toLowerCase();
-  if (g === "green") {
+  if (g === "green")
     return {
-      ring: "#10B981",
-      badgeBg: "#D1FAE5",
-      badgeText: "#065F46",
-      verdict: "GREEN CARD • GOOD",
+      badge: "✅ GOOD PICK",
+      ring: "#10b981",
+      bgTop: "#ecfdf5",
+      bgBottom: "#ffffff",
+      text: "#0f172a",
+      sub: "#065f46",
+      hint: "Looks clean. Nice choice.",
     };
-  }
-  if (g === "black") {
+  if (g === "black")
     return {
-      ring: "#EF4444",
-      badgeBg: "rgba(239,68,68,0.15)",
-      badgeText: "#991B1B",
-      verdict: "BLACK CARD • AVOID",
+      badge: "⛔ AVOID",
+      ring: "#ef4444",
+      bgTop: "#0b1220",
+      bgBottom: "#111827",
+      text: "#ffffff",
+      sub: "rgba(255,255,255,.75)",
+      hint: "Red flags found. Consider alternatives.",
     };
-  }
+  // default yellow
   return {
-    ring: "#F59E0B",
-    badgeBg: "#FEF3C7",
-    badgeText: "#92400E",
-    verdict: "YELLOW CARD • CAUTION",
+    badge: "⚠️ CAUTION",
+    ring: "#f59e0b",
+    bgTop: "#fffbeb",
+    bgBottom: "#ffffff",
+    text: "#0f172a",
+    sub: "rgba(120,53,15,.85)",
+    hint: "Some ingredients may be concerning.",
   };
-}
-
-function shortName(name: string) {
-  const s = (name || "").trim();
-  if (!s) return "Food item";
-  // OG 图上太长会难看，做个截断
-  return s.length > 42 ? s.slice(0, 42) + "…" : s;
 }
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const id = searchParams.get("id");
 
-  // ✅ base url：在 edge 里用当前请求 origin
-  const origin = new URL(req.url).origin;
+  // 可选：如果你以后想让首页分享也“像结果”，可以传 ?g=yellow&s=62
+  const grade = searchParams.get("g") || "yellow";
+  const scoreRaw = searchParams.get("s");
+  const score = Math.max(0, Math.min(100, Number(scoreRaw ?? 62)));
 
-  let product = "Food item";
-  let score = 0;
-  let grade = "yellow";
-
-  if (id) {
-    try {
-      const res = await fetch(`${origin}/api/public-scan?id=${encodeURIComponent(id)}`, {
-        // 不要缓存太久，避免分享卡和内容差很久
-        cache: "no-store",
-      });
-      if (res.ok) {
-        const d = await res.json();
-        product = d?.product_name ?? product;
-        score = clampScore(d?.score);
-        grade = (d?.grade ?? grade).toLowerCase();
-      }
-    } catch {
-      // ignore -> fallback
-    }
-  }
-
-  const theme = gradeTheme(grade);
-  const productDisplay = shortName(product);
+  const t = pickTheme(grade);
 
   return new ImageResponse(
     (
@@ -79,105 +54,145 @@ export async function GET(req: Request) {
           width: "1200px",
           height: "630px",
           display: "flex",
-          background: "#FFFFFF",
+          flexDirection: "column",
+          justifyContent: "space-between",
           padding: "64px",
+          background: `linear-gradient(180deg, ${t.bgTop} 0%, ${t.bgBottom} 70%)`,
           fontFamily:
-            'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"',
+            'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
         }}
       >
-        {/* 左侧：品牌 + 文案 */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-          {/* 顶部品牌 */}
-          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-            <div
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 14,
-                background: "#111827",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "white",
-                fontWeight: 900,
-                fontSize: 20,
-              }}
-            >
-              GP
-            </div>
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              <div style={{ fontSize: 30, fontWeight: 900, color: "#111827" }}>
-                GoodPick
-              </div>
-              <div style={{ fontSize: 16, color: "#6B7280", marginTop: 2 }}>
-                Food Scanner • Clean Score • Alternatives
-              </div>
-            </div>
+        {/* top bar */}
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <div
+            style={{
+              fontSize: 34,
+              fontWeight: 900,
+              letterSpacing: "-0.02em",
+              color: t.text,
+            }}
+          >
+            GoodPick
           </div>
-
-          {/* 商品名 */}
-          <div style={{ marginTop: 36, fontSize: 48, fontWeight: 900, color: "#111827", lineHeight: 1.1 }}>
-            {productDisplay}
-          </div>
-
-          {/* 徽章 */}
-          <div style={{ marginTop: 20, display: "flex" }}>
-            <div
-              style={{
-                padding: "12px 18px",
-                borderRadius: 999,
-                background: theme.badgeBg,
-                color: theme.badgeText,
-                fontSize: 18,
-                fontWeight: 900,
-                letterSpacing: 1,
-              }}
-            >
-              {theme.verdict}
-            </div>
-          </div>
-
-          {/* 底部提示 */}
-          <div style={{ marginTop: "auto", display: "flex", alignItems: "baseline", gap: 12 }}>
-            <div style={{ fontSize: 18, fontWeight: 800, color: "#111827", letterSpacing: 2 }}>
-              GOODPICK.APP
-            </div>
-            <div style={{ fontSize: 16, color: "#6B7280" }}>
-              Scan packaged foods and get a better choice in seconds.
-            </div>
+          <div
+            style={{
+              fontSize: 22,
+              fontWeight: 800,
+              padding: "10px 16px",
+              borderRadius: 999,
+              background:
+                grade === "black"
+                  ? "rgba(239,68,68,.18)"
+                  : grade === "green"
+                  ? "rgba(16,185,129,.18)"
+                  : "rgba(245,158,11,.18)",
+              color: t.text,
+            }}
+          >
+            Food Scanner
           </div>
         </div>
 
-        {/* 右侧：分数圈 */}
-        <div style={{ width: 420, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {/* center block (微信裁切安全区：中轴信息) */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 22,
+            marginTop: 10,
+          }}
+        >
           <div
             style={{
-              width: 320,
-              height: 320,
-              borderRadius: "999px",
-              border: `22px solid ${theme.ring}`,
+              fontSize: 34,
+              fontWeight: 900,
+              padding: "12px 18px",
+              borderRadius: 16,
+              background:
+                grade === "black"
+                  ? "rgba(239,68,68,.16)"
+                  : grade === "green"
+                  ? "rgba(16,185,129,.16)"
+                  : "rgba(245,158,11,.16)",
+              color: t.text,
+            }}
+          >
+            {t.badge}
+          </div>
+
+          <div
+            style={{
+              width: 220,
+              height: 220,
+              borderRadius: 999,
+              border: `14px solid ${t.ring}`,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              position: "relative",
+              color: t.text,
+              background:
+                grade === "black" ? "rgba(255,255,255,.06)" : "rgba(255,255,255,.7)",
             }}
           >
-            <div style={{ fontSize: 110, fontWeight: 950, color: "#111827", lineHeight: 1 }}>
-              {score}
+            <div style={{ fontSize: 92, fontWeight: 950, lineHeight: 1 }}>
+              {Number.isFinite(score) ? score : 62}
             </div>
+          </div>
 
-            <div
-              style={{
-                position: "absolute",
-                bottom: 22,
-                fontSize: 16,
-                fontWeight: 800,
-                color: "#6B7280",
-                letterSpacing: 2,
-              }}
-            >
-              CLEAN SCORE
-            </div>
+          <div
+            style={{
+              fontSize: 30,
+              fontWeight: 800,
+              color: t.text,
+              textAlign: "center",
+              maxWidth: 860,
+              lineHeight: 1.25,
+            }}
+          >
+            {t.hint}
+          </div>
+
+          <div
+            style={{
+              fontSize: 22,
+              fontWeight: 700,
+              color: t.sub,
+              textAlign: "center",
+              maxWidth: 900,
+              lineHeight: 1.4,
+            }}
+          >
+            Scan packaged foods and instantly see if they’re a good pick — or not.
+          </div>
+        </div>
+
+        {/* bottom CTA */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-end",
+          }}
+        >
+          <div style={{ fontSize: 22, fontWeight: 800, color: t.sub }}>
+            goodpick.app
+          </div>
+
+          <div
+            style={{
+              fontSize: 24,
+              fontWeight: 900,
+              padding: "14px 18px",
+              borderRadius: 16,
+              background:
+                grade === "black"
+                  ? "rgba(255,255,255,.10)"
+                  : "rgba(15,23,42,.08)",
+              color: t.text,
+            }}
+          >
+            Scan yours → 
           </div>
         </div>
       </div>
@@ -185,6 +200,10 @@ export async function GET(req: Request) {
     {
       width: 1200,
       height: 630,
+      headers: {
+        // 微信会缓存，先让它缓存也没问题（稳定）。你想强制刷新我再给你版本。
+        "Cache-Control": "public, max-age=3600, s-maxage=3600",
+      },
     }
   );
 }
