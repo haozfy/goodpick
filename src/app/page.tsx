@@ -9,12 +9,9 @@ import {
   Loader2,
   ArrowRight,
   History,
-  Sparkles,
   ShieldCheck,
   Zap,
   ChartLine,
-  Wand2,
-  Settings2,
   Dot,
 } from "lucide-react";
 
@@ -128,17 +125,19 @@ export default function Home() {
     return "bg-neutral-100 text-neutral-800 ring-neutral-200";
   };
 
-  // ✅ Demo: keep everything same, only make it "chocolate → chocolate swaps"
+  // ✅ Demo: chocolate → chocolate swaps
   const demo = useMemo(
     () => ({
-      title: "Too many avoid items lately",
       product: "Milk chocolate bar",
       score: 45,
       gradeLabel: "AVOID",
+      title: "Marketing ≠ healthy",
+      oneLine:
+        "We flag what matters, then give you one next step — no nutrition report vibe.",
       topSignal: "Added sugar",
       signals: ["Added sugar", "Ultra-processed", "Many additives"],
-      focus: ["sugar", "cholesterol", "trans fats", "additives"],
-      next: "Swap to a darker bar (70%+) or a smaller portion this week.",
+      focus: ["Sugar", "Cholesterol", "Trans fats", "Additives"],
+      next: "Swap to a darker bar (70%+) or keep the same treat but smaller portions.",
       swaps: [
         {
           name: "70–85% dark chocolate",
@@ -197,36 +196,26 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Hero */}
+        {/* HERO (tight, high-ticket) */}
         <div className="mt-8 text-left">
           <div className="inline-flex items-center gap-2 rounded-full bg-white/80 ring-1 ring-neutral-200/60 px-3 py-1.5 backdrop-blur">
-            <Sparkles size={14} className="text-emerald-600" />
-            <span className="text-xs font-bold text-neutral-700">
-              Scan → Insights → Smart swaps
+            <span className="text-[11px] font-black tracking-wide text-neutral-800">
+              Decision-grade food picks
             </span>
           </div>
 
-          <h1 className="mt-4 text-[38px] leading-[1.05] font-black tracking-tight text-neutral-900">
-            Your food choices,
+          <h1 className="mt-4 text-[38px] leading-[1.03] font-black tracking-tight text-neutral-900">
+            Stop guessing.
             <br />
-            <span className="text-emerald-600">made simple.</span>
+            <span className="text-emerald-600">See what’s really in it.</span>
           </h1>
 
           <p className="mt-3 text-sm font-semibold text-neutral-700 leading-relaxed">
-            Not a “nutrition report”. Just clear signals and one next step.
+            Most “healthy” food is marketing. We score reality — then give you{" "}
+            <span className="text-neutral-900 font-black">one next step</span>.
           </p>
 
-          {/* Natural mention (front but not listy) */}
-          <p className="mt-2 text-xs text-neutral-500 leading-relaxed">
-            Flags issues tied to{" "}
-            <span className="font-semibold text-neutral-900">sugar</span>,{" "}
-            <span className="font-semibold text-neutral-900">cholesterol</span>,{" "}
-            <span className="font-semibold text-neutral-900">trans fats</span>, and{" "}
-            <span className="font-semibold text-neutral-900">additives</span> — without
-            the “nutrition report” vibe.
-          </p>
-
-          {/* Trust row */}
+          {/* trust row (minimal) */}
           <div className="mt-5 flex items-center gap-2 text-[11px] text-neutral-500">
             <span className="inline-flex items-center gap-1 rounded-full bg-white/70 ring-1 ring-neutral-200/60 px-2 py-1">
               <Zap size={14} className="text-neutral-700" /> Seconds
@@ -249,7 +238,7 @@ export default function Home() {
           className="hidden"
         />
 
-        {/* Primary CTA */}
+        {/* PRIMARY CTA (single action) */}
         <div className="mt-7 rounded-3xl bg-white ring-1 ring-neutral-200/60 shadow-[0_18px_45px_rgba(0,0,0,0.10)] p-4">
           <button
             onClick={pickFile}
@@ -271,10 +260,10 @@ export default function Home() {
                   </div>
                   <div className="text-left">
                     <div className="text-base font-black tracking-wide">
-                      Scan food label
+                      Scan a label
                     </div>
                     <div className="text-[11px] opacity-70">
-                      get signals + one next step
+                      score → signals → next step
                     </div>
                   </div>
                 </div>
@@ -285,11 +274,47 @@ export default function Home() {
 
           <div className="mt-3 flex items-center justify-between text-[11px] text-neutral-500">
             <span>No signup required</span>
-            <span className="font-semibold">Works best with packaged labels</span>
+            <span className="font-semibold">Works best on packaged labels</span>
           </div>
         </div>
 
-        {/* Demo preview (conversion driver) */}
+        {/* PROOF (short, not feature-list) */}
+        <div className="mt-5 rounded-3xl bg-white/80 ring-1 ring-neutral-200/60 backdrop-blur p-4">
+          <div className="text-xs font-black text-neutral-700">How it helps</div>
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            <div className="rounded-2xl bg-white ring-1 ring-neutral-200/60 p-3">
+              <div className="text-[11px] font-black text-neutral-900">Score</div>
+              <div className="text-[10px] text-neutral-500">
+                clear & comparable
+              </div>
+            </div>
+            <div className="rounded-2xl bg-white ring-1 ring-neutral-200/60 p-3">
+              <div className="text-[11px] font-black text-neutral-900">
+                Signals
+              </div>
+              <div className="text-[10px] text-neutral-500">
+                what’s driving it
+              </div>
+            </div>
+            <div className="rounded-2xl bg-white ring-1 ring-neutral-200/60 p-3">
+              <div className="text-[11px] font-black text-neutral-900">
+                Next step
+              </div>
+              <div className="text-[10px] text-neutral-500">one small swap</div>
+            </div>
+          </div>
+
+          <div className="mt-3 text-[11px] text-neutral-500 leading-relaxed">
+            Flags issues tied to{" "}
+            <span className="font-semibold text-neutral-900">sugar</span>,{" "}
+            <span className="font-semibold text-neutral-900">cholesterol</span>,{" "}
+            <span className="font-semibold text-neutral-900">trans fats</span>, and{" "}
+            <span className="font-semibold text-neutral-900">additives</span> —
+            without the “nutrition report” vibe.
+          </div>
+        </div>
+
+        {/* PREVIEW (conversion driver) */}
         <div className="mt-5 rounded-3xl bg-white/80 ring-1 ring-neutral-200/60 backdrop-blur p-4">
           <div className="flex items-center justify-between">
             <div className="text-xs font-black text-neutral-700">
@@ -306,21 +331,13 @@ export default function Home() {
             </span>
           </div>
 
-          {/* summary headline like your Insights page */}
           <div className="mt-3 text-base font-black tracking-tight text-neutral-900">
             {demo.title}
           </div>
-
           <div className="mt-1 text-xs text-neutral-600 leading-relaxed">
-            We flag issues tied to{" "}
-            <span className="font-semibold text-neutral-900">{demo.focus[0]}</span>,{" "}
-            <span className="font-semibold text-neutral-900">{demo.focus[1]}</span>,{" "}
-            <span className="font-semibold text-neutral-900">{demo.focus[2]}</span>, and{" "}
-            <span className="font-semibold text-neutral-900">{demo.focus[3]}</span> —
-            then give you one next step.
+            {demo.oneLine}
           </div>
 
-          {/* product line */}
           <div className="mt-3 rounded-2xl bg-white ring-1 ring-neutral-200/60 p-3">
             <div className="flex items-center justify-between">
               <div className="min-w-0">
@@ -350,7 +367,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* signal chips */}
             <div className="mt-3 flex flex-wrap gap-2">
               {demo.signals.map((s) => (
                 <span
@@ -362,9 +378,8 @@ export default function Home() {
               ))}
             </div>
 
-            {/* subtle focus chips (natural, not loud) */}
             <div className="mt-3 flex flex-wrap gap-2">
-              {["Sugar", "Cholesterol", "Trans fats", "Additives"].map((t) => (
+              {demo.focus.map((t) => (
                 <span
                   key={t}
                   className="text-[11px] font-semibold text-neutral-600 rounded-full bg-white ring-1 ring-neutral-200/60 px-2 py-1 inline-flex items-center gap-1"
@@ -411,7 +426,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* next step (like your Insights next step) */}
           <div className="mt-3 rounded-2xl bg-neutral-900 text-white p-3">
             <div className="text-[11px] font-bold opacity-80">Next step</div>
             <div className="text-sm font-black">{demo.next}</div>
@@ -421,42 +435,7 @@ export default function Home() {
           </div>
 
           <div className="mt-3 text-[11px] text-neutral-500">
-            This is what you’ll see in Insights + Smart swaps.
-          </div>
-        </div>
-
-        {/* Feature preview cards (tie to your existing pages) */}
-        <div className="mt-5 grid grid-cols-3 gap-2">
-          <div className="rounded-2xl bg-white ring-1 ring-neutral-200/60 p-3">
-            <div className="h-9 w-9 rounded-2xl bg-neutral-100 flex items-center justify-center">
-              <ChartLine size={18} className="text-neutral-800" />
-            </div>
-            <div className="mt-2 text-[11px] font-black text-neutral-900">
-              Insights
-            </div>
-            <div className="text-[10px] text-neutral-500">7/30 day patterns</div>
-          </div>
-
-          <div className="rounded-2xl bg-white ring-1 ring-neutral-200/60 p-3">
-            <div className="h-9 w-9 rounded-2xl bg-neutral-100 flex items-center justify-center">
-              <Wand2 size={18} className="text-neutral-800" />
-            </div>
-            <div className="mt-2 text-[11px] font-black text-neutral-900">
-              Smart swaps
-            </div>
-            <div className="text-[10px] text-neutral-500">
-              cleaner alternatives
-            </div>
-          </div>
-
-          <div className="rounded-2xl bg-white ring-1 ring-neutral-200/60 p-3">
-            <div className="h-9 w-9 rounded-2xl bg-neutral-100 flex items-center justify-center">
-              <Settings2 size={18} className="text-neutral-800" />
-            </div>
-            <div className="mt-2 text-[11px] font-black text-neutral-900">
-              Preferences
-            </div>
-            <div className="text-[10px] text-neutral-500">low sugar, etc.</div>
+            This is what you’ll see after scanning.
           </div>
         </div>
 
@@ -478,11 +457,10 @@ export default function Home() {
           ) : (
             <div className="rounded-2xl bg-white ring-1 ring-neutral-200/60 p-4">
               <div className="text-sm font-black text-neutral-900">
-                Keep your trends & history
+                Keep history + trends
               </div>
               <div className="mt-1 text-xs text-neutral-600">
-                Log in to save Insights, track patterns, and unlock unlimited
-                scans.
+                Log in to save Insights, track patterns, and unlock unlimited scans.
               </div>
               <Link
                 href="/login"
@@ -516,8 +494,7 @@ export default function Home() {
                               gradePill(scan.grade),
                             ].join(" ")}
                           >
-                            {String(scan.grade || "").toUpperCase()} ·{" "}
-                            {scan.score}
+                            {String(scan.grade || "").toUpperCase()} · {scan.score}
                           </span>
                         </div>
                         <div className="mt-2 font-bold text-neutral-900 truncate">
