@@ -29,7 +29,7 @@ export const metadata: Metadata = {
     // 没有 id 的情况下，也会生成一张“食品评分 App”风格的图
     images: [
       {
-        url: "/api/og/scan",
+        url: "/api/og/scan?v=2",
         width: 1200,
         height: 630,
         alt: "GoodPick Food Scanner",
