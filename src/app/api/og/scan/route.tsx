@@ -1,7 +1,12 @@
 // src/app/api/og/scan/route.ts
 import { ImageResponse } from "next/og";
 
-export const runtime = "edge";
+// ✅ 微信最稳：不要用 edge
+export const runtime = "nodejs";
+
+// ✅ 避免被静态化/奇怪缓存
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function pickTheme(grade: string) {
   const g = (grade || "").toLowerCase();
@@ -40,10 +45,12 @@ function pickTheme(grade: string) {
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
 
-  // 可选：如果你以后想让首页分享也“像结果”，可以传 ?g=yellow&s=62
-  const grade = searchParams.get("g") || "yellow";
+  const grade = (searchParams.get("g") || "yellow").toLowerCase();
   const scoreRaw = searchParams.get("s");
-  const score = Math.max(0, Math.min(100, Number(scoreRaw ?? 62)));
+  const scoreNum = Number(scoreRaw ?? 62);
+  const score = Number.isFinite(scoreNum)
+    ? Math.max(0, Math.min(100, scoreNum))
+    : 62;
 
   const t = pickTheme(grade);
 
@@ -132,11 +139,13 @@ export async function GET(req: Request) {
               justifyContent: "center",
               color: t.text,
               background:
-                grade === "black" ? "rgba(255,255,255,.06)" : "rgba(255,255,255,.7)",
+                grade === "black"
+                  ? "rgba(255,255,255,.06)"
+                  : "rgba(255,255,255,.7)",
             }}
           >
             <div style={{ fontSize: 92, fontWeight: 950, lineHeight: 1 }}>
-              {Number.isFinite(score) ? score : 62}
+              {score}
             </div>
           </div>
 
@@ -192,7 +201,7 @@ export async function GET(req: Request) {
               color: t.text,
             }}
           >
-            Scan yours → 
+            Scan yours →
           </div>
         </div>
       </div>
@@ -201,8 +210,10 @@ export async function GET(req: Request) {
       width: 1200,
       height: 630,
       headers: {
-        // 微信会缓存，先让它缓存也没问题（稳定）。你想强制刷新我再给你版本。
-        "Cache-Control": "public, max-age=3600, s-maxage=3600",
+        // ✅ 关键：明确告诉微信这是 png
+        "Content-Type": "image/png",
+        // ✅ 关键：先不缓存，避免微信缓存到坏响应
+        "Cache-Control": "no-store",
       },
     }
   );
