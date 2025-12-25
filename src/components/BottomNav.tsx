@@ -3,88 +3,73 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ScanLine, ArrowRightLeft, Clock, User } from "lucide-react";
-
-type Item = {
-  href: string;
-  label: string;
-  Icon: React.ComponentType<{ size?: number; strokeWidth?: number }>;
-  match?: (pathname: string) => boolean;
-};
-
-const items: Item[] = [
-  {
-    href: "/scan",
-    label: "Scan",
-    Icon: ScanLine,
-    match: (p) => p.startsWith("/scan"),
-  },
-  {
-    href: "/recs",
-    label: "Recs",
-    Icon: ArrowRightLeft,
-    match: (p) => p.startsWith("/recs"),
-  },
-  {
-    href: "/",
-    label: "History",
-    Icon: Clock,
-    match: (p) => p === "/" || p.startsWith("/history"),
-  },
-  {
-    href: "/account",
-    label: "Account",
-    Icon: User,
-    match: (p) => p.startsWith("/account"),
-  },
-];
+import { Search, Clock, User, ArrowRightLeft } from "lucide-react";
 
 export default function BottomNav() {
   const pathname = usePathname();
 
+  const isActive = (path: string) => {
+    if (path === "/") return pathname === "/" || pathname.startsWith("/history");
+    return pathname.startsWith(path);
+  };
+
   return (
-    <nav
-      aria-label="Bottom navigation"
-      className="fixed bottom-0 left-0 right-0 z-50 pb-[max(env(safe-area-inset-bottom),12px)]"
-    >
-      <div className="mx-auto w-full max-w-md px-4">
-        <div className="rounded-2xl bg-white/85 shadow-[0_10px_30px_rgba(0,0,0,0.10)] ring-1 ring-black/5 backdrop-blur-xl">
-          <div className="flex h-16 items-center justify-between px-2">
-            {items.map(({ href, label, Icon, match }) => {
-              const active = match ? match(pathname) : pathname === href;
+    <nav className="fixed bottom-6 left-6 right-6 z-50">
+      <div className="flex h-16 items-center justify-around rounded-full bg-white/90 px-2 shadow-2xl ring-1 ring-neutral-200/50 backdrop-blur-lg">
+        
+        {/* Scan */}
+        <NavLink
+          href="/scan"
+          icon={<Search size={24} />}
+          active={isActive("/scan")}
+        />
 
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  aria-label={label}
-                  className="group flex w-20 flex-col items-center justify-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900/20 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
-                >
-                  <div
-                    className={[
-                      "flex h-10 w-10 items-center justify-center rounded-xl transition-colors",
-                      active
-                        ? "text-neutral-900"
-                        : "text-neutral-400 group-hover:text-neutral-600",
-                    ].join(" ")}
-                  >
-                    <Icon size={22} strokeWidth={active ? 2.2 : 1.9} />
-                  </div>
+        {/* Recs */}
+        <NavLink
+          href="/recs"
+          icon={<ArrowRightLeft size={24} />}
+          active={isActive("/recs")}
+        />
 
-                  <span
-                    className={[
-                      "text-[11px] transition-colors",
-                      active ? "text-neutral-900" : "text-neutral-500",
-                    ].join(" ")}
-                  >
-                    {label}
-                  </span>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
+        {/* History */}
+        <NavLink
+          href="/"
+          icon={<Clock size={24} />}
+          active={isActive("/")}
+        />
+
+        {/* Account */}
+        <NavLink
+          href="/account"
+          icon={<User size={24} />}
+          active={isActive("/account")}
+        />
       </div>
     </nav>
+  );
+}
+
+function NavLink({
+  href,
+  icon,
+  active,
+}: {
+  href: string;
+  icon: React.ReactNode;
+  active?: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      aria-label={typeof href === "string" ? href : undefined}
+      className={[
+        "flex h-12 w-12 items-center justify-center rounded-full transition-all",
+        active
+          ? "bg-neutral-900 text-white shadow-md scale-105"
+          : "text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600",
+      ].join(" ")}
+    >
+      {icon}
+    </Link>
   );
 }
