@@ -1,10 +1,8 @@
-// src/app/api/recs/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-type Verdict = "good" | "caution" | "avoid";
 type Price = "$" | "$$" | "$$$";
 
 type Prefs = {
@@ -19,17 +17,12 @@ type Alt = {
   name: string;
   reason: string;
   price?: Price;
-
-  // meta
   sodium_mg?: number | null;
   added_sugar_g?: number | null;
   cholesterol_mg?: number | null;
   ingredient_count?: number | null;
   has_sweeteners?: boolean | null;
-
-  // optional debug/meta
-  source?: "scan" | "off" | "fallback";
-  barcode?: string;
+  source?: "ai" | "off"; // ✅ 方便 UI 标注来源
 };
 
 const DEFAULT_PREFS: Prefs = {
@@ -40,13 +33,30 @@ const DEFAULT_PREFS: Prefs = {
   prefer_simple_ingredients: false,
 };
 
-function scoreToVerdict(score: number | null | undefined): Verdict {
-  const s = typeof score === "number" ? score : 0;
-  if (s >= 80) return "good";
-  if (s >= 50) return "caution";
-  return "avoid";
-}
+// ✅ OFF 只在 aisle 明确时启用
+const AISLE_TO_OFF_TAGS: Record<string, string[]> = {
+  instant_noodles: ["en:instant-noodles", "en:noodles"],
+  chocolate: ["en:chocolates", "en:chocolate-bars"],
+  cookies: ["en:cookies", "en:biscuits"],
+  chips: ["en:crisps", "en:chips"],
+  soda: ["en:sodas", "en:carbonated-drinks"],
+  cereal: ["en:breakfast-cereals"],
+  protein_bar: ["en:protein-bars"],
+  yogurt: ["en:yogurts"],
+  ice_cream: ["en:ice-creams"],
+  bread: ["en:breads"],
+  sauce: ["en:sauces"],
+  juice: ["en:fruit-juices"],
+  snack: ["en:snacks"],
+};
 
+// ✅ 过期时间（缓存 7 天）
+const OFF_TTL_DAYS = 7;
+
+// ✅ 更稳：confidence < 0.6 不启用 OFF
+const OFF_MIN_CONFIDENCE = 0.6;
+
+// ========== helpers ==========
 function isPrice(x: any): x is Price {
   return x === "$" || x === "$$" || x === "$$$";
 }
@@ -57,310 +67,167 @@ function clampNum(x: any, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
 }
 
-function safeArray<T = any>(x: any): T[] {
-  return Array.isArray(x) ? x : [];
-}
-
 function normalizeAlt(raw: any): Alt | null {
   const name = String(raw?.name ?? "").trim().slice(0, 80);
   if (!name) return null;
 
-  const reason = String(raw?.reason ?? "").trim().slice(0, 140);
-  const price = isPrice(raw?.price) ? raw.price : undefined;
-
-  const sodium_mg = raw?.sodium_mg === null ? null : clampNum(raw?.sodium_mg, 0, 5000);
-  const added_sugar_g = raw?.added_sugar_g === null ? null : clampNum(raw?.added_sugar_g, 0, 200);
-  const cholesterol_mg = raw?.cholesterol_mg === null ? null : clampNum(raw?.cholesterol_mg, 0, 2000);
-  const ingredient_count = raw?.ingredient_count === null ? null : clampNum(raw?.ingredient_count, 0, 200);
-  const has_sweeteners =
-    typeof raw?.has_sweeteners === "boolean"
-      ? raw.has_sweeteners
-      : raw?.has_sweeteners === null
-      ? null
-      : null;
-
   return {
     name,
-    reason,
-    price,
-    sodium_mg,
-    added_sugar_g,
-    cholesterol_mg,
-    ingredient_count,
-    has_sweeteners,
+    reason: String(raw?.reason ?? "").trim().slice(0, 140),
+    price: isPrice(raw?.price) ? raw.price : undefined,
+    sodium_mg: raw?.sodium_mg === null ? null : clampNum(raw?.sodium_mg, 0, 5000),
+    added_sugar_g: raw?.added_sugar_g === null ? null : clampNum(raw?.added_sugar_g, 0, 200),
+    cholesterol_mg: raw?.cholesterol_mg === null ? null : clampNum(raw?.cholesterol_mg, 0, 2000),
+    ingredient_count: raw?.ingredient_count === null ? null : clampNum(raw?.ingredient_count, 0, 200),
+    has_sweeteners:
+      typeof raw?.has_sweeteners === "boolean"
+        ? raw.has_sweeteners
+        : raw?.has_sweeteners === null
+        ? null
+        : null,
+    source: "ai",
   };
 }
 
-/** ---------- Preference filtering/sorting (keep your logic) ---------- */
-
+// 硬过滤（不跨类，只做健康硬规则）
 function hardFilter(alts: Alt[], prefs: Prefs) {
   let out = [...alts];
 
   if (prefs.avoid_sweeteners) out = out.filter((a) => a.has_sweeteners !== true);
-
   if (prefs.low_sodium) out = out.filter((a) => a.sodium_mg == null || a.sodium_mg <= 450);
-
   if (prefs.low_sugar) out = out.filter((a) => a.added_sugar_g == null || a.added_sugar_g <= 6);
-
   if (prefs.low_cholesterol) out = out.filter((a) => a.cholesterol_mg == null || a.cholesterol_mg <= 60);
-
   if (prefs.prefer_simple_ingredients) out = out.filter((a) => a.ingredient_count == null || a.ingredient_count <= 12);
 
+  // 放宽（但不违反 avoid_sweeteners）
   if (out.length === 0) {
-    // loosen gently but never violate avoid_sweeteners
     out = [...alts].filter((a) => (prefs.avoid_sweeteners ? a.has_sweeteners !== true : true));
     if (out.length === 0) out = [...alts];
   }
-
   return out;
 }
 
+// 排序（越低越好）
 function prefScore(a: Alt, prefs: Prefs) {
   let s = 0;
 
   if (prefs.low_sodium) s += a.sodium_mg == null ? 3 : a.sodium_mg <= 250 ? 0 : a.sodium_mg <= 450 ? 1 : 4;
-
   if (prefs.low_sugar) s += a.added_sugar_g == null ? 3 : a.added_sugar_g <= 2 ? 0 : a.added_sugar_g <= 6 ? 1 : 4;
-
   if (prefs.low_cholesterol) s += a.cholesterol_mg == null ? 2 : a.cholesterol_mg <= 20 ? 0 : a.cholesterol_mg <= 60 ? 1 : 3;
-
   if (prefs.prefer_simple_ingredients) s += a.ingredient_count == null ? 2 : a.ingredient_count <= 8 ? 0 : a.ingredient_count <= 12 ? 1 : 3;
-
   if (prefs.avoid_sweeteners) s += a.has_sweeteners == null ? 1 : a.has_sweeteners ? 6 : 0;
+
+  // ✅ 轻微偏好 OFF（同分时更稳定）
+  if (a.source === "off") s -= 0.1;
 
   return s;
 }
 
-function fallbackRecs(verdict: Verdict): Alt[] {
-  if (verdict === "avoid") {
-    return [
-      { name: "Plain Greek yogurt + fruit", reason: "Lower sugar, higher protein, fewer additives.", price: "$$", source: "fallback" },
-      { name: "Unsalted nuts / nut butter", reason: "Better fats, more satiety, less processed.", price: "$$", source: "fallback" },
-      { name: "Whole-food snack (banana / apple)", reason: "Natural ingredients, predictable impact.", price: "$", source: "fallback" },
-    ];
+// 同类兜底
+function sameAisleFallback(aisle: string): Alt[] {
+  switch (aisle) {
+    case "instant_noodles":
+      return [{ name: "Air-dried ramen (lower sodium)", reason: "Same noodles, less sodium.", price: "$$", source: "ai" }];
+    case "chocolate":
+      return [{ name: "70% dark chocolate", reason: "Lower sugar, higher cocoa.", price: "$$", source: "ai" }];
+    default:
+      return [{ name: "Cleaner option (same category)", reason: "Same category, simpler ingredients.", price: "$$", source: "ai" }];
   }
-  return [
-    { name: "Lower-sugar option (same category)", reason: "Same vibe, less sugar spike.", price: "$", source: "fallback" },
-    { name: "Short ingredient list option", reason: "Fewer additives and flavorings.", price: "$$", source: "fallback" },
-    { name: "Whole grain / higher fiber pick", reason: "More stable energy and fullness.", price: "$$", source: "fallback" },
-  ];
 }
 
-/** ---------- OFF integration ---------- */
+// ========== OFF: external fetch ==========
+async function fetchOFFCandidatesExternal(aisle: string, limit = 12) {
+  const tags = AISLE_TO_OFF_TAGS[aisle];
+  if (!tags || tags.length === 0) return [];
 
-type OffRow = {
-  barcode: string;
-  name: string | null;
-  brand: string | null;
-  image_url: string | null;
-  ingredients_text: string | null;
-  nutriments: any | null;
-  categories_tags: string[] | null;
-  additives_tags: string[] | null;
-  nova_group: number | null;
-  nutriscore_grade: string | null;
-};
+  const tagQuery = tags.map((t) => `categories_tags=${encodeURIComponent(t)}`).join("&");
 
-function textIncludesAny(haystack: string, needles: string[]) {
-  const h = haystack.toLowerCase();
-  return needles.some((n) => h.includes(n.toLowerCase()));
+  const url = `https://world.openfoodfacts.org/cgi/search.pl?search_simple=1&json=1&page_size=${limit}&${tagQuery}&fields=id,code,product_name,nutriments,ingredients_text,additives_tags,nova_group`;
+
+  const res = await fetch(url);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data.products) ? data.products : [];
 }
 
-function detectSweeteners(ingredientsText?: string | null, additivesTags?: string[] | null) {
-  const t = (ingredientsText || "").toLowerCase();
-
-  // you can extend this list later
-  const sweetenerKeywords = [
-    "sucralose",
-    "aspartame",
-    "acesulfame",
-    "acesulfame-k",
-    "stevia",
-    "erythritol",
-    "xylitol",
-    "maltitol",
-    "sorbitol",
-    "saccharin",
-  ];
-
-  const hasKw = sweetenerKeywords.some((k) => t.includes(k));
-  const hasTag = (additivesTags || []).some((x) => String(x).includes("en:sweeteners"));
-  return hasKw || hasTag;
-}
-
-function ingredientCount(ingredientsText?: string | null) {
-  if (!ingredientsText) return null;
-  const parts = ingredientsText
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return parts.length ? Math.min(200, parts.length) : null;
-}
-
-// OFF nutriments are often in grams per 100g (sodium_100g in g). Convert to mg-ish.
-function sodiumMgFromOff(nutriments: any) {
-  const v = nutriments?.sodium_100g;
-  if (v == null) return null;
-  const g = Number(v);
-  if (!Number.isFinite(g)) return null;
-  return Math.round(g * 1000); // g -> mg
-}
-
-function sugarGFromOff(nutriments: any) {
-  const v = nutriments?.sugars_100g;
-  if (v == null) return null;
-  const g = Number(v);
-  if (!Number.isFinite(g)) return null;
-  return Math.round(g * 10) / 10; // keep 0.1
-}
-
-// cholesterol_100g sometimes exists in g
-function cholesterolMgFromOff(nutriments: any) {
-  const v = nutriments?.cholesterol_100g;
-  if (v == null) return null;
-  const g = Number(v);
-  if (!Number.isFinite(g)) return null;
-  return Math.round(g * 1000);
-}
-
-function offRowToAlt(p: OffRow, prefs: Prefs, aisleTitle: string): Alt | null {
-  const name = String(p.name || "").trim();
+function offToAlt(p: any): Alt | null {
+  const name = String(p?.product_name ?? "").trim();
   if (!name) return null;
 
-  const hasSweeteners = detectSweeteners(p.ingredients_text, p.additives_tags);
-  const ingCount = ingredientCount(p.ingredients_text);
-
-  const sodium_mg = sodiumMgFromOff(p.nutriments);
-  const added_sugar_g = sugarGFromOff(p.nutriments);
-  const cholesterol_mg = cholesterolMgFromOff(p.nutriments);
-
-  // reason: keep it short + “same aisle”
-  const reasons: string[] = [];
-  reasons.push(`Same category: ${aisleTitle}.`);
-
-  if (prefs.avoid_sweeteners && !hasSweeteners) reasons.push("No sweeteners flagged.");
-  if (prefs.prefer_simple_ingredients && ingCount != null) reasons.push(`~${ingCount} ingredients.`);
-  if (prefs.low_sugar && added_sugar_g != null) reasons.push(`Sugars ~${added_sugar_g}g/100g.`);
-  if (prefs.low_sodium && sodium_mg != null) reasons.push(`Sodium ~${sodium_mg}mg/100g.`);
-
-  // if too empty, generic
-  if (reasons.length < 2) reasons.push("Cleaner pick within the same aisle.");
+  const nutr = p?.nutriments || {};
+  const additives = Array.isArray(p?.additives_tags) ? p.additives_tags : [];
+  const ingredientsText = typeof p?.ingredients_text === "string" ? p.ingredients_text : "";
 
   return {
-    name: p.brand ? `${p.brand} — ${name}`.slice(0, 80) : name.slice(0, 80),
-    reason: reasons.join(" "),
-    price: undefined,
-    sodium_mg,
-    added_sugar_g,
-    cholesterol_mg,
-    ingredient_count: ingCount,
-    has_sweeteners: hasSweeteners,
+    name: name.slice(0, 80),
+    reason: "Cleaner option from same category.",
+    price: "$$",
+    sodium_mg: nutr.sodium_100g != null ? Math.round(Number(nutr.sodium_100g) * 1000) : null,
+    added_sugar_g: nutr.sugars_100g != null ? Number(nutr.sugars_100g) : null,
+    cholesterol_mg: nutr.cholesterol_100g != null ? Math.round(Number(nutr.cholesterol_100g) * 100) : null,
+    ingredient_count: ingredientsText ? ingredientsText.split(",").length : null,
+    has_sweeteners: additives.some((t: string) => String(t).toLowerCase().includes("sweetener")),
     source: "off",
-    barcode: p.barcode,
   };
 }
 
-/** Aisle: prefer scan.aisle_key, fallback to taxonomy + product_name keyword match */
-async function getAisle(supabase: any, scan: any): Promise<{ aisle_key: string; title: string; off_tags: string[]; confidence: number }> {
-  // 1) if scan has aisle_key, use it
-  const sk = String(scan?.aisle_key || "").trim();
-  if (sk) {
-    const { data } = await supabase.from("aisle_taxonomy").select("aisle_key,title,off_tags").eq("aisle_key", sk).maybeSingle();
-    if (data?.aisle_key) {
-      return { aisle_key: data.aisle_key, title: data.title, off_tags: data.off_tags || [], confidence: Number(scan?.aisle_confidence ?? 0.85) };
-    }
-  }
+// ========== OFF: cache read/write ==========
+async function readOFFCache(supabase: any, aisle: string, take = 30) {
+  const { data, error } = await supabase
+    .from("off_products")
+    .select("off_id, aisle_key, product_name, ingredients_text, nutriments, additives_tags, nova_group, updated_at")
+    .eq("aisle_key", aisle)
+    .order("updated_at", { ascending: false })
+    .limit(take);
 
-  // 2) fallback: match product_name against keywords
-  const name = String(scan?.product_name || "").toLowerCase();
-  const { data: rows } = await supabase.from("aisle_taxonomy").select("aisle_key,title,off_tags,keywords");
-  const list = Array.isArray(rows) ? rows : [];
-
-  let best = list[0];
-  let bestScore = 0;
-
-  for (const r of list) {
-    const kws = Array.isArray(r.keywords) ? r.keywords : [];
-    const hit = kws.filter((k: string) => name.includes(String(k).toLowerCase())).length;
-    if (hit > bestScore) {
-      bestScore = hit;
-      best = r;
-    }
-  }
-
-  if (best?.aisle_key && bestScore > 0) {
-    return { aisle_key: best.aisle_key, title: best.title, off_tags: best.off_tags || [], confidence: Math.min(0.8, 0.55 + bestScore * 0.1) };
-  }
-
-  // 3) final fallback: generic “cookies” if nothing else
-  return { aisle_key: "cookies", title: "Cookies", off_tags: ["en:cookies", "en:biscuits"], confidence: 0.4 };
+  if (error) return [];
+  return Array.isArray(data) ? data : [];
 }
 
-/** OFF search: use category tags from aisle_taxonomy (same-aisle constraint) */
-async function offSearchSameAisle(offTags: string[], q: string, pageSize = 30) {
-  // Pick the first tag as primary filter; it’s okay for MVP.
-  const primary = offTags?.[0] || "";
-
-  const params = new URLSearchParams({
-    fields:
-      "code,product_name,brands,image_front_url,ingredients_text,nutriments,categories_tags,additives_tags,nova_group,nutriscore_grade",
-    page_size: String(pageSize),
-  });
-
-  // Use search_terms as a gentle hint; primary filter keeps it in aisle.
-  if (q) params.set("search_terms", q);
-
-  // OFF v2 supports tag filters via "categories_tags" in some setups; for compatibility,
-  // we do a broad search and filter locally by categories_tags match.
-  const url = `https://world.openfoodfacts.org/api/v2/search?${params.toString()}`;
-
-  const r = await fetch(url, { cache: "no-store" });
-  if (!r.ok) throw new Error("OFF search failed");
-  const j = await r.json();
-
-  const products = Array.isArray(j?.products) ? j.products : [];
-  const filtered = products.filter((p: any) => {
-    const cats = Array.isArray(p?.categories_tags) ? p.categories_tags : [];
-    if (!primary) return true;
-    return cats.includes(primary) || cats.some((x: string) => offTags.includes(x));
-  });
-
-  return filtered;
+function isCacheFresh(rows: any[]) {
+  if (!rows || rows.length === 0) return false;
+  const newest = rows[0]?.updated_at ? new Date(rows[0].updated_at).getTime() : 0;
+  if (!newest) return false;
+  const ttlMs = OFF_TTL_DAYS * 24 * 60 * 60 * 1000;
+  return Date.now() - newest < ttlMs;
 }
 
-async function upsertOffProducts(supabase: any, products: any[]) {
-  const rows = products
-    .filter((p: any) => p?.code)
-    .map((p: any) => ({
-      barcode: String(p.code),
-      name: p.product_name || null,
-      brand: p.brands || null,
-      image_url: p.image_front_url || null,
-      ingredients_text: p.ingredients_text || null,
-      nutriments: p.nutriments || null,
-      categories_tags: Array.isArray(p.categories_tags) ? p.categories_tags : [],
-      additives_tags: Array.isArray(p.additives_tags) ? p.additives_tags : [],
-      nova_group: typeof p.nova_group === "number" ? p.nova_group : null,
-      nutriscore_grade: p.nutriscore_grade || null,
+async function upsertOFFCache(supabase: any, aisle: string, products: any[]) {
+  if (!products || products.length === 0) return;
+
+  const rows = products.map((p: any) => {
+    const off_id =
+      String(p?.id ?? p?.code ?? "").trim() ||
+      String(p?._id ?? "").trim();
+
+    const product_name = String(p?.product_name ?? "").trim().slice(0, 160);
+    const ingredients_text =
+      typeof p?.ingredients_text === "string"
+        ? p.ingredients_text.slice(0, 2000)
+        : null;
+
+    return {
+      off_id,
+      aisle_key: aisle,
+      product_name: product_name || null,
+      ingredients_text,
+      nutriments: p?.nutriments ?? null,
+      additives_tags: Array.isArray(p?.additives_tags) ? p.additives_tags : null,
+      nova_group: Number.isFinite(Number(p?.nova_group)) ? Number(p.nova_group) : null,
+      raw: p,
       updated_at: new Date().toISOString(),
-    }));
+    };
+  }).filter((r: any) => r.off_id);
 
-  if (!rows.length) return;
-  await supabase.from("off_products").upsert(rows, { onConflict: "barcode" });
+  if (rows.length === 0) return;
+
+  // ✅ onConflict: off_id（你 SQL 里 unique(off_id)）
+  await supabase.from("off_products").upsert(rows, { onConflict: "off_id" });
 }
 
-function makePrefsKey(prefs: Prefs) {
-  return [
-    prefs.low_sodium ? "ls" : "",
-    prefs.low_sugar ? "lsg" : "",
-    prefs.low_cholesterol ? "lc" : "",
-    prefs.avoid_sweeteners ? "asw" : "",
-    prefs.prefer_simple_ingredients ? "psi" : "",
-  ]
-    .filter(Boolean)
-    .join("_");
-}
-
+/* =====================================================
+   Handler
+===================================================== */
 export async function GET(req: Request) {
   try {
     const supabase = await createClient();
@@ -368,18 +235,31 @@ export async function GET(req: Request) {
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const { searchParams } = new URL(req.url);
-    const scanId = searchParams.get("scanId") || searchParams.get("scan");
+    const scanId = searchParams.get("scanId");
     if (!scanId) return NextResponse.json({ error: "Missing scanId" }, { status: 400 });
 
-    // 1) scan
+    // 1) scan（要 aisle + confidence + alternatives）
     const { data: scan, error: scanErr } = await supabase
       .from("scans")
-      .select("id, user_id, product_name, analysis, alternatives, score, verdict, risk_tags, triggers, created_at, aisle_key, aisle_confidence")
+      .select("id, product_name, verdict, alternatives, aisle_key, aisle_confidence")
       .eq("id", scanId)
       .eq("user_id", user.id)
       .single();
 
     if (scanErr || !scan) return NextResponse.json({ error: "Scan not found" }, { status: 404 });
+
+    const aisle = scan.aisle_key || "unknown";
+    const conf = typeof scan.aisle_confidence === "number" ? scan.aisle_confidence : 0;
+
+    // verdict good → 不推荐
+    if (scan.verdict === "good") {
+      return NextResponse.json({
+        scanId,
+        productName: scan.product_name || "Unknown",
+        aisle,
+        alternatives: [],
+      });
+    }
 
     // 2) prefs
     const { data: prefRow } = await supabase
@@ -387,156 +267,96 @@ export async function GET(req: Request) {
       .select("low_sodium, low_sugar, low_cholesterol, avoid_sweeteners, prefer_simple_ingredients")
       .eq("user_id", user.id)
       .maybeSingle();
-
     const prefs: Prefs = { ...DEFAULT_PREFS, ...(prefRow || {}) };
-    const prefsKey = makePrefsKey(prefs);
 
-    const verdict: Verdict = (scan.verdict as Verdict) || scoreToVerdict(scan.score);
+    // 3) AI 候选池（同类）
+    const rawAlts = Array.isArray(scan.alternatives) ? scan.alternatives : [];
+    let alts = rawAlts.map(normalizeAlt).filter(Boolean) as Alt[];
 
-    // ✅ good verdict -> no recs
-    if (verdict === "good") {
-      return NextResponse.json({
-        scanId: scan.id,
-        productName: scan.product_name || "Unknown",
-        analysis: String(scan.analysis || "").trim(),
-        score: typeof scan.score === "number" ? scan.score : null,
-        verdict,
-        alternatives: [],
-        prefs,
-        triggers: Array.isArray(scan.triggers) ? scan.triggers : [],
-      });
-    }
+    // 4) OFF 扩容（缓存优先）
+    let offMode: "disabled" | "cache" | "external" = "disabled";
 
-    // 3) cache hit?
-    const { data: cached } = await supabase
-      .from("recs_cache")
-      .select("items, aisle_key, aisle_confidence, strategy")
-      .eq("scan_id", scan.id)
-      .eq("user_id", user.id)
-      .eq("strategy", `same-aisle-cleaner:${prefsKey}`)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const canUseOFF =
+      aisle !== "unknown" &&
+      AISLE_TO_OFF_TAGS[aisle]?.length &&
+      conf >= OFF_MIN_CONFIDENCE;
 
-    if (cached?.items) {
-      return NextResponse.json({
-        scanId: scan.id,
-        productName: scan.product_name || "Unknown",
-        analysis: String(scan.analysis || "").trim(),
-        score: typeof scan.score === "number" ? scan.score : null,
-        verdict,
-        alternatives: safeArray(cached.items),
-        prefs,
-        triggers: Array.isArray(scan.triggers) ? scan.triggers : [],
-        aisle_key: cached.aisle_key,
-        aisle_confidence: cached.aisle_confidence,
-      });
-    }
+    if (alts.length < 5 && canUseOFF) {
+      // 4.1 读缓存
+      const cacheRows = await readOFFCache(supabase, aisle, 30);
+      const cacheFresh = isCacheFresh(cacheRows);
 
-    // 4) start with scan.alternatives
-    const rawAlts = safeArray(scan.alternatives);
-    const scanAlts = rawAlts.map(normalizeAlt).filter(Boolean) as Alt[];
-    const scanAltsTagged = scanAlts.map((a) => ({ ...a, source: "scan" as const }));
-
-    // 5) decide aisle
-    const aisle = await getAisle(supabase, scan);
-
-    // 6) If scan alts not enough, fetch OFF same-aisle candidates
-    let combined: Alt[] = [...scanAltsTagged];
-
-    if (combined.length < 6) {
-      // try local cache first (off_products)
-      // simplest: filter by any aisle off_tags match
-      const { data: localOff } = await supabase
-        .from("off_products")
-        .select("barcode,name,brand,image_url,ingredients_text,nutriments,categories_tags,additives_tags,nova_group,nutriscore_grade")
-        .overlaps("categories_tags", aisle.off_tags)
-        .limit(80);
-
-      const localRows = Array.isArray(localOff) ? (localOff as OffRow[]) : [];
-      const localAlts = localRows
-        .map((p) => offRowToAlt(p, prefs, aisle.title))
-        .filter(Boolean) as Alt[];
-
-      combined = combined.concat(localAlts);
-
-      // still not enough -> hit OFF
-      if (combined.length < 12) {
-        const q = String(scan.product_name || "").slice(0, 40);
-        const offProducts = await offSearchSameAisle(aisle.off_tags, q, 40);
-        await upsertOffProducts(supabase, offProducts);
-
-        const offAlts = offProducts
-          .map((p: any) =>
-            offRowToAlt(
-              {
-                barcode: String(p.code),
-                name: p.product_name || null,
-                brand: p.brands || null,
-                image_url: p.image_front_url || null,
-                ingredients_text: p.ingredients_text || null,
-                nutriments: p.nutriments || null,
-                categories_tags: Array.isArray(p.categories_tags) ? p.categories_tags : [],
-                additives_tags: Array.isArray(p.additives_tags) ? p.additives_tags : [],
-                nova_group: typeof p.nova_group === "number" ? p.nova_group : null,
-                nutriscore_grade: p.nutriscore_grade || null,
-                ecoscore_grade: null,
-              },
-              prefs,
-              aisle.title
-            )
+      if (cacheRows.length > 0) {
+        const cacheAlts = cacheRows
+          .map((r: any) =>
+            offToAlt({
+              product_name: r.product_name,
+              nutriments: r.nutriments,
+              ingredients_text: r.ingredients_text,
+              additives_tags: r.additives_tags,
+            })
           )
           .filter(Boolean) as Alt[];
 
-        combined = combined.concat(offAlts);
+        // merge + 去重
+        const seen = new Set(alts.map((a) => a.name.toLowerCase()));
+        for (const a of cacheAlts) {
+          const key = a.name.toLowerCase();
+          if (!seen.has(key)) {
+            alts.push(a);
+            seen.add(key);
+          }
+        }
+
+        offMode = "cache";
+      }
+
+      // 4.2 缓存不新鲜 / 过少 → 外网拉取并写回缓存
+      const needRefresh = !cacheFresh || cacheRows.length < 12;
+      if (needRefresh) {
+        const external = await fetchOFFCandidatesExternal(aisle, 12);
+        if (external.length > 0) {
+          // 写回缓存
+          await upsertOFFCache(supabase, aisle, external);
+
+          // 同时把 external 也 merge 进来（让这次请求立即变好）
+          const extAlts = external.map(offToAlt).filter(Boolean) as Alt[];
+          const seen = new Set(alts.map((a) => a.name.toLowerCase()));
+          for (const a of extAlts) {
+            const key = a.name.toLowerCase();
+            if (!seen.has(key)) {
+              alts.push(a);
+              seen.add(key);
+            }
+          }
+
+          offMode = "external";
+        }
       }
     }
 
-    // 7) De-dup by name
-    const seen = new Set<string>();
-    combined = combined.filter((a) => {
-      const k = a.name.toLowerCase();
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    });
-
-    // 8) Apply prefs and pick top 3
-    let finalAlts = hardFilter(combined, prefs)
+    // 5) 健康过滤 + 偏好排序
+    alts = hardFilter(alts, prefs)
       .sort((a, b) => prefScore(a, prefs) - prefScore(b, prefs))
       .slice(0, 3);
 
-    if (finalAlts.length === 0) finalAlts = fallbackRecs(verdict);
-
-    // 9) analysis fallback
-    const triggers = Array.isArray(scan.triggers) ? scan.triggers : [];
-    const analysis =
-      (scan.analysis && String(scan.analysis).trim()) ||
-      (triggers.length ? String(triggers[0]) : "");
-
-    // 10) write recs_cache (best effort)
-    await supabase.from("recs_cache").insert({
-      scan_id: scan.id,
-      user_id: user.id,
-      aisle_key: aisle.aisle_key,
-      aisle_confidence: aisle.confidence,
-      strategy: `same-aisle-cleaner:${prefsKey}`,
-      items: finalAlts,
-    });
+    if (alts.length === 0) alts = sameAisleFallback(aisle);
 
     return NextResponse.json({
-      scanId: scan.id,
+      scanId,
       productName: scan.product_name || "Unknown",
-      analysis,
-      score: typeof scan.score === "number" ? scan.score : null,
-      verdict,
-      alternatives: finalAlts,
-      prefs,
-      triggers,
-      aisle_key: aisle.aisle_key,
-      aisle_confidence: aisle.confidence,
+      aisle,
+      aisle_confidence: conf,
+      alternatives: alts,
+      debug: {
+        ai_alts: rawAlts.length,
+        off_mode: offMode, // disabled | cache | external
+        off_enabled: canUseOFF,
+        cache_ttl_days: OFF_TTL_DAYS,
+        min_confidence: OFF_MIN_CONFIDENCE,
+      },
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
+    return NextResponse.json({ error: e.message || "Server error" }, { status: 500 });
   }
 }

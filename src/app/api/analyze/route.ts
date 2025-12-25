@@ -1,12 +1,10 @@
-// ✅ 建议强制 node runtime（需要 Buffer / arrayBuffer 更稳）
+// src/app/api/analyze/route.ts
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 type Verdict = "good" | "caution" | "avoid";
-
-// ✅ 三档
 type Grade = "green" | "yellow" | "black";
 
 type Prefs = {
@@ -30,19 +28,31 @@ type Alternative = {
 
 type AIResult = {
   product_name: string;
-  score: number; // 0-100
+  score: number;
   verdict: Verdict;
   risk_tags: string[];
   analysis: string;
   triggers: string[];
   alternatives: Alternative[];
+
+  // ✅ aisle
+  aisle_key?: string;
+  aisle_confidence?: number;
 };
 
-// ✅ 免费次数（非 Pro）：统一 10 次
+// ✅ 免费次数（非 Pro）
 const TRIAL_LIMIT = 10;
 
-// ✅ 未登录原图限制大小：建议 12MB（iPhone 照片一般 2–6MB，偶尔更大）
+// ✅ 未登录原图限制大小
 const ANON_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+
+const DEFAULT_PREFS: Prefs = {
+  low_sodium: false,
+  low_sugar: false,
+  low_cholesterol: false,
+  avoid_sweeteners: false,
+  prefer_simple_ingredients: false,
+};
 
 const ALLOWED_TAGS = new Set([
   "added_sugar",
@@ -58,13 +68,22 @@ const ALLOWED_TAGS = new Set([
   "simple_ingredients",
 ]);
 
-const DEFAULT_PREFS: Prefs = {
-  low_sodium: false,
-  low_sugar: false,
-  low_cholesterol: false,
-  avoid_sweeteners: false,
-  prefer_simple_ingredients: false,
-};
+const ALLOWED_AISLES = new Set([
+  "instant_noodles",
+  "chocolate",
+  "cookies",
+  "chips",
+  "soda",
+  "cereal",
+  "protein_bar",
+  "yogurt",
+  "ice_cream",
+  "bread",
+  "sauce",
+  "juice",
+  "snack",
+  "unknown",
+]);
 
 function clampInt(n: any, min: number, max: number) {
   const x = Number.isFinite(Number(n)) ? Math.trunc(Number(n)) : min;
@@ -82,7 +101,6 @@ function verdictFromScore(score: number): Verdict {
   return "avoid";
 }
 
-// ✅ 只根据 score 决定三档（最稳定）
 function gradeFromScore(score: number): Grade {
   if (score >= 80) return "green";
   if (score >= 50) return "yellow";
@@ -149,15 +167,12 @@ function normalizeAlternative(a: any): Alternative {
   };
 }
 
+// ✅ 只加 aisle，不动评分
 function normalizeAI(raw: any): AIResult {
-  const product_name =
-    String(raw?.product_name ?? "").trim() || "Unknown product";
+  const product_name = String(raw?.product_name ?? "").trim() || "Unknown product";
 
-  // ✅ 分数是唯一真源
   const score = clampInt(raw?.score, 0, 100);
-
-  // ✅ verdict 强制由 score 推导（避免 AI 自相矛盾）
-  const verdict: Verdict = verdictFromScore(score);
+  const verdict = verdictFromScore(score); // 强制由 score 推导
 
   const analysis = String(raw?.analysis ?? "").trim().slice(0, 120);
 
@@ -183,7 +198,21 @@ function normalizeAI(raw: any): AIResult {
       .filter((a: Alternative) => a.name.length > 0);
   }
 
-  return { product_name, score, verdict, risk_tags, analysis, triggers, alternatives };
+  const aisle_raw = String(raw?.aisle_key ?? "unknown").toLowerCase().trim();
+  const aisle_key = ALLOWED_AISLES.has(aisle_raw) ? aisle_raw : "unknown";
+  const aisle_confidence = clampNum(raw?.aisle_confidence, 0, 1);
+
+  return {
+    product_name,
+    score,
+    verdict,
+    risk_tags,
+    analysis,
+    triggers,
+    alternatives,
+    aisle_key,
+    aisle_confidence,
+  };
 }
 
 function prefsToPrompt(p: Prefs) {
@@ -218,15 +247,10 @@ async function readJsonBody(req: Request) {
   }
 }
 
-function withAnonCookie(
-  res: NextResponse,
-  shouldSetAnonCookie: boolean,
-  anonId: string | null
-) {
+function withAnonCookie(res: NextResponse, shouldSetAnonCookie: boolean, anonId: string | null) {
   if (!shouldSetAnonCookie || !anonId) return res;
 
   const secure = process.env.NODE_ENV === "production";
-
   res.cookies.set("gp_anon", anonId, {
     path: "/",
     httpOnly: true,
@@ -240,30 +264,30 @@ function withAnonCookie(
 export async function POST(req: Request) {
   try {
     const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const { data: { user } } = await supabase.auth.getUser();
 
+    // ===== anon cookie =====
     const cookieHeader = req.headers.get("cookie") || "";
     let anonId = getAnonIdFromCookie(cookieHeader);
     let shouldSetAnonCookie = false;
+
     if (!anonId) {
       anonId = genAnonId();
       shouldSetAnonCookie = true;
     }
 
+    // ===== prefs =====
     let prefs: Prefs = { ...DEFAULT_PREFS };
     if (user) {
       const { data: prefRow } = await supabase
         .from("user_preferences")
-        .select(
-          "low_sodium, low_sugar, low_cholesterol, avoid_sweeteners, prefer_simple_ingredients"
-        )
+        .select("low_sodium, low_sugar, low_cholesterol, avoid_sweeteners, prefer_simple_ingredients")
         .eq("user_id", user.id)
         .maybeSingle();
       prefs = { ...DEFAULT_PREFS, ...(prefRow || {}) };
     }
 
+    // ===== isPro =====
     let isPro = false;
     if (user) {
       const { data: profile } = await supabase
@@ -274,6 +298,7 @@ export async function POST(req: Request) {
       isPro = !!profile?.is_pro;
     }
 
+    // ===== trial quota (non-pro) =====
     if (!isPro) {
       const { count, error: countError } = await supabase
         .from("anon_scans")
@@ -291,6 +316,7 @@ export async function POST(req: Request) {
       }
     }
 
+    // ===== read image =====
     const contentType = req.headers.get("content-type") || "";
     let imageForOpenAI: string | null = null;
 
@@ -319,6 +345,7 @@ export async function POST(req: Request) {
     } else if (contentType.includes("application/json")) {
       const body = await readJsonBody(req);
       const imageBase64 = body?.imageBase64;
+
       if (!imageBase64) {
         const res = NextResponse.json(
           { error: "No image provided", code: "NO_IMAGE_BASE64" },
@@ -326,6 +353,7 @@ export async function POST(req: Request) {
         );
         return withAnonCookie(res, shouldSetAnonCookie, anonId);
       }
+
       imageForOpenAI = String(imageBase64);
     } else {
       const res = NextResponse.json(
@@ -335,6 +363,7 @@ export async function POST(req: Request) {
       return withAnonCookie(res, shouldSetAnonCookie, anonId);
     }
 
+    // ===== OpenAI call =====
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -343,6 +372,8 @@ export async function POST(req: Request) {
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
+        temperature: 0.2,
+        max_tokens: 650,
         messages: [
           {
             role: "system",
@@ -356,6 +387,8 @@ Return ONLY valid JSON (no markdown). Use this exact structure:
   "risk_tags": string[],
   "analysis": string,
   "triggers": string[],
+  "aisle_key": string,
+  "aisle_confidence": number,
   "alternatives": [
     {
       "name": string,
@@ -371,6 +404,13 @@ Return ONLY valid JSON (no markdown). Use this exact structure:
 }
 
 User preferences (may tighten rules): ${prefsToPrompt(prefs)}.
+
+aisle_key rule:
+Pick ONE best-fit value from:
+["instant_noodles","chocolate","cookies","chips","soda","cereal","protein_bar","yogurt","ice_cream","bread","sauce","juice","snack","unknown"]
+
+aisle_confidence: 0 to 1.
+If unsure, use "unknown" with confidence <= 0.5.
 
 Scoring rule:
 Start from 100 and only subtract points based on health risks:
@@ -395,7 +435,7 @@ triggers must be verifiable (numbers if visible).
 
 alternatives rule:
 - If verdict is "good", alternatives must be []
-- Otherwise provide 2-3 realistic cleaner alternatives (same category).
+- Otherwise provide 2-3 realistic cleaner alternatives (same aisle/category).
 - Fill meta fields when you can infer; otherwise set them to null.`,
           },
           {
@@ -406,8 +446,6 @@ alternatives rule:
             ],
           },
         ],
-        max_tokens: 650,
-        temperature: 0.2,
       }),
     });
 
@@ -426,10 +464,11 @@ alternatives rule:
       return withAnonCookie(res, shouldSetAnonCookie, anonId);
     }
 
-    // ✅ 最终三档与 verdict：统一由 score 推导（杜绝 55 绿卡）
+    // ✅ 最终 verdict/grade：只由 score 推导（不动你原逻辑）
     const finalVerdict = verdictFromScore(aiResult.score);
     const finalGrade = gradeFromScore(aiResult.score);
 
+    // ===== record anon scan (non-pro) =====
     if (!isPro) {
       const { error: anonErr } = await supabase.from("anon_scans").insert({
         anon_id: anonId,
@@ -440,12 +479,13 @@ alternatives rule:
         risk_tags: aiResult.risk_tags,
         triggers: aiResult.triggers,
         alternatives: aiResult.alternatives,
+        aisle_key: aiResult.aisle_key || "unknown",
+        aisle_confidence: aiResult.aisle_confidence ?? 0.5,
       });
       if (anonErr) throw new Error(anonErr.message);
     }
 
-    let saved: any = null;
-
+    // ===== save scan for authed =====
     if (user) {
       const { data: scanData, error: dbError } = await supabase
         .from("scans")
@@ -460,14 +500,25 @@ alternatives rule:
           risk_tags: aiResult.risk_tags,
           triggers: aiResult.triggers,
           alternatives: aiResult.alternatives,
+          aisle_key: aiResult.aisle_key || "unknown",
+          aisle_confidence: aiResult.aisle_confidence ?? 0.5,
         })
-        .select("id, created_at, product_name, score, verdict, grade, analysis, risk_tags, triggers, alternatives")
+        .select("id, created_at, product_name, score, verdict, grade, analysis, risk_tags, triggers, alternatives, aisle_key, aisle_confidence")
         .single();
 
       if (dbError) throw new Error(dbError.message);
-      saved = scanData;
-    } else {
-      saved = {
+
+      const res = NextResponse.json({
+        id: String(scanData.id),
+        scan: scanData,
+      });
+      return withAnonCookie(res, shouldSetAnonCookie, anonId);
+    }
+
+    // ===== guest response =====
+    const res = NextResponse.json({
+      id: null,
+      scan: {
         id: null,
         created_at: new Date().toISOString(),
         product_name: aiResult.product_name,
@@ -478,18 +529,13 @@ alternatives rule:
         risk_tags: aiResult.risk_tags,
         triggers: aiResult.triggers,
         alternatives: aiResult.alternatives,
-      };
-    }
-
-    const res = NextResponse.json({
-      id: saved?.id ? String(saved.id) : null,
-      scan: saved,
+        aisle_key: aiResult.aisle_key || "unknown",
+        aisle_confidence: aiResult.aisle_confidence ?? 0.5,
+      },
     });
-
     return withAnonCookie(res, shouldSetAnonCookie, anonId);
   } catch (error: any) {
     console.error("Analyze API Error:", error);
-    const res = NextResponse.json({ error: error.message ?? "Server error" }, { status: 500 });
-    return res;
+    return NextResponse.json({ error: error.message ?? "Server error" }, { status: 500 });
   }
 }
