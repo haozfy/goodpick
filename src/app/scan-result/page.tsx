@@ -285,8 +285,8 @@ function ResultContent() {
     try {
       setShareMsg("");
 
-      const origin =
-        typeof window !== "undefined" ? window.location.origin : "";
+      // ✅ FIX：统一 canonical 域名，避免 www 传播（配合 next.config 永久跳转）
+      const origin = "https://goodpick.app";
 
       if (!id || !origin) {
         setShareMsg("Nothing to share");
