@@ -119,25 +119,43 @@ export default function Home() {
     if (grade === "yellow")
       return "bg-amber-100 text-amber-800 ring-amber-200";
     if (grade === "red") return "bg-rose-100 text-rose-800 ring-rose-200";
-    if (grade === "avoid") return "bg-neutral-900 text-white ring-neutral-900/10";
+    if (grade === "avoid")
+      return "bg-neutral-900 text-white ring-neutral-900/10";
     if (grade === "caution")
       return "bg-amber-100 text-amber-900 ring-amber-200";
-    if (grade === "good") return "bg-emerald-100 text-emerald-900 ring-emerald-200";
+    if (grade === "good")
+      return "bg-emerald-100 text-emerald-900 ring-emerald-200";
     return "bg-neutral-100 text-neutral-800 ring-neutral-200";
   };
 
-  // ✅ Demo: anchored to your Insights/Swaps/Prefs story
+  // ✅ Demo: keep everything same, only make it "chocolate → chocolate swaps"
   const demo = useMemo(
     () => ({
       title: "Too many avoid items lately",
-      product: "Chocolate cookies",
+      product: "Milk chocolate bar",
       score: 45,
       gradeLabel: "AVOID",
-      topSignal: "Ultra-processed",
-      signals: ["Ultra-processed", "Added sugar", "Many additives"],
-      // natural highlight terms users care about
+      topSignal: "Added sugar",
+      signals: ["Added sugar", "Ultra-processed", "Many additives"],
       focus: ["sugar", "cholesterol", "trans fats", "additives"],
-      next: "Swap one ultra-processed snack this week.",
+      next: "Swap to a darker bar (70%+) or a smaller portion this week.",
+      swaps: [
+        {
+          name: "70–85% dark chocolate",
+          reason: "Less sugar, more cocoa — still chocolate.",
+          price: "$$",
+        },
+        {
+          name: "Mini chocolate squares (portion-pack)",
+          reason: "Same treat, easier to keep sugar down.",
+          price: "$$",
+        },
+        {
+          name: "Cacao nibs + a little dark chocolate",
+          reason: "More cocoa flavor with less sweet hit.",
+          price: "$$",
+        },
+      ],
     }),
     []
   );
@@ -204,8 +222,8 @@ export default function Home() {
             <span className="font-semibold text-neutral-900">sugar</span>,{" "}
             <span className="font-semibold text-neutral-900">cholesterol</span>,{" "}
             <span className="font-semibold text-neutral-900">trans fats</span>, and{" "}
-            <span className="font-semibold text-neutral-900">additives</span> — without the
-            “nutrition report” vibe.
+            <span className="font-semibold text-neutral-900">additives</span> — without
+            the “nutrition report” vibe.
           </p>
 
           {/* Trust row */}
@@ -275,7 +293,8 @@ export default function Home() {
         <div className="mt-5 rounded-3xl bg-white/80 ring-1 ring-neutral-200/60 backdrop-blur p-4">
           <div className="flex items-center justify-between">
             <div className="text-xs font-black text-neutral-700">
-              Preview <span className="font-semibold text-neutral-400">(example)</span>
+              Preview{" "}
+              <span className="font-semibold text-neutral-400">(example)</span>
             </div>
             <span
               className={[
@@ -297,8 +316,8 @@ export default function Home() {
             <span className="font-semibold text-neutral-900">{demo.focus[0]}</span>,{" "}
             <span className="font-semibold text-neutral-900">{demo.focus[1]}</span>,{" "}
             <span className="font-semibold text-neutral-900">{demo.focus[2]}</span>, and{" "}
-            <span className="font-semibold text-neutral-900">{demo.focus[3]}</span> — then
-            give you one next step.
+            <span className="font-semibold text-neutral-900">{demo.focus[3]}</span> —
+            then give you one next step.
           </div>
 
           {/* product line */}
@@ -357,6 +376,41 @@ export default function Home() {
             </div>
           </div>
 
+          {/* ✅ Smart swaps: chocolate → chocolate (same aisle) */}
+          <div className="mt-3 rounded-2xl bg-white ring-1 ring-neutral-200/60 p-3">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-black text-neutral-800">
+                Smart swaps
+              </div>
+              <div className="text-[11px] font-semibold text-neutral-500">
+                same category
+              </div>
+            </div>
+
+            <div className="mt-2 space-y-2">
+              {demo.swaps.map((x) => (
+                <div
+                  key={x.name}
+                  className="rounded-2xl bg-neutral-50 ring-1 ring-neutral-200/60 p-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-black text-neutral-900 truncate">
+                        {x.name}
+                      </div>
+                      <div className="mt-1 text-xs text-neutral-600 leading-relaxed">
+                        {x.reason}
+                      </div>
+                    </div>
+                    <span className="shrink-0 text-[11px] font-black rounded-full bg-white ring-1 ring-neutral-200/60 px-2 py-1 text-neutral-700">
+                      {x.price}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {/* next step (like your Insights next step) */}
           <div className="mt-3 rounded-2xl bg-neutral-900 text-white p-3">
             <div className="text-[11px] font-bold opacity-80">Next step</div>
@@ -390,7 +444,9 @@ export default function Home() {
             <div className="mt-2 text-[11px] font-black text-neutral-900">
               Smart swaps
             </div>
-            <div className="text-[10px] text-neutral-500">cleaner alternatives</div>
+            <div className="text-[10px] text-neutral-500">
+              cleaner alternatives
+            </div>
           </div>
 
           <div className="rounded-2xl bg-white ring-1 ring-neutral-200/60 p-3">
@@ -425,7 +481,8 @@ export default function Home() {
                 Keep your trends & history
               </div>
               <div className="mt-1 text-xs text-neutral-600">
-                Log in to save Insights, track patterns, and unlock unlimited scans.
+                Log in to save Insights, track patterns, and unlock unlimited
+                scans.
               </div>
               <Link
                 href="/login"
@@ -459,7 +516,8 @@ export default function Home() {
                               gradePill(scan.grade),
                             ].join(" ")}
                           >
-                            {String(scan.grade || "").toUpperCase()} · {scan.score}
+                            {String(scan.grade || "").toUpperCase()} ·{" "}
+                            {scan.score}
                           </span>
                         </div>
                         <div className="mt-2 font-bold text-neutral-900 truncate">
