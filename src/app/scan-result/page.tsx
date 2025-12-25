@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 
 const ANON_KEY = "goodpick_anon_id";
-const GUEST_KEY = "gp_last_scan";
+const GUEST_KEY = "gp_last_scan"; // 你首页存的 sessionStorage key
 
 type Grade = "green" | "yellow" | "black";
 type Verdict = "good" | "caution" | "avoid";
@@ -31,7 +31,7 @@ function safeJsonParse<T>(raw: string | null): T | null {
 }
 
 function getOrCreateAnonId() {
-  if (typeof window === "undefined") return null;
+  if (typeof window === "undefined") return null reminded;
   let id = localStorage.getItem(ANON_KEY);
   if (!id) {
     id = crypto.randomUUID();
@@ -60,20 +60,62 @@ function isIOS() {
   return /iPad|iPhone|iPod/.test(navigator.userAgent);
 }
 
+function isMobile() {
+  if (typeof navigator === "undefined") return false;
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+}
+
+function isWeChat() {
+  if (typeof navigator === "undefined") return false;
+  return /MicroMessenger/i.test(navigator.userAgent);
+}
+
+function openImagePreview(dataUrl: string) {
+  const w = window.open();
+  if (!w) return false;
+
+  w.document.write(`
+    <html>
+      <head>
+        <title>GoodPick</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <style>
+          body{margin:0;display:flex;align-items:center;justify-content:center;background:#000;}
+          img{max-width:100vw;max-height:100vh;}
+          .tip{position:fixed;top:12px;left:12px;right:12px;color:#fff;
+            font:14px -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial;
+            background:rgba(0,0,0,.55);padding:10px 12px;border-radius:12px}
+        </style>
+      </head>
+      <body>
+        <div class="tip">${
+          isIOS()
+            ? "Long-press the image to save to Photos."
+            : "Right-click / long-press the image to save."
+        }</div>
+        <img src="${dataUrl}" />
+      </body>
+    </html>
+  `);
+  w.document.close();
+  return true;
+}
+
 function ResultContent() {
   const searchParams = useSearchParams();
-  const id = searchParams.get("id");
+  const id = searchParams.get("id"); // may be null
 
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // ✅ 分开：Share/Download 提示互不抢
+  // ✅ Share / Download 提示分别管理（避免互相抢按钮文案）
   const [shareMsg, setShareMsg] = useState<string>("");
   const [dlMsg, setDlMsg] = useState<string>("");
 
-  // ✅ 导出态：去阴影 + 隐藏按钮区
+  // ✅ 导出态：去阴影 + 隐藏右侧按钮（但保留 goodpick.app）
   const [exporting, setExporting] = useState(false);
 
+  // ✅ 下载图片用
   const cardRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -137,7 +179,9 @@ function ResultContent() {
         }
       }
 
-      // 3) Public fallback（分享给别人/微信打开）
+      // ✅ D) Public fallback：解决“分享到微信/别人手机打不开”
+      // 你需要在 Supabase 建 RPC：get_scan_public(p_id uuid)
+      // 返回至少包含：id, product_name, score, verdict, grade, analysis
       try {
         const { data: pub, error: pubErr } = await supabase.rpc(
           "get_scan_public",
@@ -151,7 +195,7 @@ function ResultContent() {
         // ignore
       }
 
-      // 4) 最后兜底：再读 sessionStorage
+      // C) 最后兜底：再读 sessionStorage（防止“有 id 但库没写”的情况）
       const raw =
         typeof window !== "undefined"
           ? sessionStorage.getItem(GUEST_KEY)
@@ -167,7 +211,7 @@ function ResultContent() {
     };
   }, [id]);
 
-  // ✅ hooks 必须都在 return 前
+  // ✅ 关键：所有 hooks / memo 都必须在任何 return 之前执行
   const grade = useMemo(() => gradeFromData(data), [data]);
   const score = Number(data?.score ?? 0);
   const productName = data?.product_name || "Unknown Product";
@@ -189,7 +233,7 @@ function ResultContent() {
         backBtn: "bg-white/10 text-white hover:bg-white/20",
         pillBtn: "bg-white/10 text-white hover:bg-white/20",
         brandText: "text-white/40 hover:text-white/70",
-        exportBg: "#111827", // ✅ 黑卡导出背景
+        exportBg: "#111827", // ✅ 导出背景（黑卡不发白）
       };
     }
     if (grade === "yellow") {
@@ -230,7 +274,7 @@ function ResultContent() {
 
   const showAlternatives = grade !== "green";
 
-  // ✅ Share：永远分享永久链接
+  // ✅ Share：永远分享“永久链接”（/scan-result?id=xxx）
   const handleShare = async () => {
     try {
       setShareMsg("");
@@ -239,7 +283,7 @@ function ResultContent() {
         typeof window !== "undefined" ? window.location.origin : "";
 
       if (!id || !origin) {
-        setShareMsg("Nothing");
+        setShareMsg("Nothing to share");
         setTimeout(() => setShareMsg(""), 1200);
         return;
       }
@@ -253,6 +297,7 @@ function ResultContent() {
         Number.isFinite(score) ? score : 0
       }) — ${productName}`;
 
+      // 1) 系统分享（iOS/Android 最好用）
       if ((navigator as any)?.share) {
         await (navigator as any).share({
           title: "GoodPick",
@@ -264,52 +309,61 @@ function ResultContent() {
         return;
       }
 
-      if (navigator.clipboard?.writeText) {
+      // 2) 复制链接
+      if (navigator.clipboard) {
         await navigator.clipboard.writeText(shareUrl);
-        setShareMsg("Copied");
+        setShareMsg("Link copied");
         setTimeout(() => setShareMsg(""), 1200);
         return;
       }
 
+      // 3) 最后兜底
       window.prompt("Copy link:", shareUrl);
-      setShareMsg("Copy");
+      setShareMsg("Copied");
       setTimeout(() => setShareMsg(""), 1200);
     } catch {
-      setShareMsg("Fail");
+      setShareMsg("Couldn’t share");
       setTimeout(() => setShareMsg(""), 1400);
     }
   };
 
-  // ✅ Download：导出时去阴影 + 隐藏按钮区；iOS/微信最稳保存
+  // ✅ Download：
+  // - 导出态：去阴影 + 隐藏按钮，但保留 goodpick.app
+  // - 电脑端：blob + a.download（避免白纸/黑纸）
+  // - 手机端：优先 share(files)； reminding不支持就预览页长按保存
   const handleDownload = async () => {
+    let blobUrl: string | null = null;
+
     try {
       setDlMsg("");
 
       const el = cardRef.current;
       if (!el) throw new Error("no-card");
 
-      // ✅ 进入导出态：去阴影 + 隐藏 Share/Download 那行
+      // 进入导出态（去阴影、隐藏按钮）
       setExporting(true);
-      await new Promise((r) => setTimeout(r, 60)); // 等 DOM 刷新稳定
+
+      // 等待 DOM & 字体准备（桌面端空白/黑纸常见原因）
+      await new Promise((r) => setTimeout(r, 80));
+      // @ts-ignore
+      if (document?.fonts?.ready) {
+        // @ts-ignore
+        await document.fonts.ready;
+      }
 
       const mod = await import("html-to-image");
 
-      // ✅ 用 DataURL 比 blob 更稳（尤其微信/iOS）
-      const dataUrl = await mod.toPng(el, {
+      // ✅ 先 blob（桌面最稳）
+      const blob = await mod.toBlob(el, {
         pixelRatio: 3,
         cacheBust: true,
         backgroundColor: theme.exportBg,
       });
 
-      // ✅ 立刻恢复页面态
+      // 恢复页面态
       setExporting(false);
 
-      if (!dataUrl) throw new Error("no-dataurl");
-
-      // 1) 试一下：转 file 走系统分享（有些 iOS 可直接“存储图像”）
-      try {
-        const res = await fetch(dataUrl);
-        const blob = await res.blob();
+      if (blob) {
         const safeName = (productName || "result")
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, "-")
@@ -321,61 +375,66 @@ function ResultContent() {
         });
 
         const nav: any = navigator;
+
+        // 1) 手机优先系统分享：可“存储图像”
         if (nav?.canShare?.({ files: [file] }) && nav?.share) {
           await nav.share({ title: "GoodPick", files: [file] });
           setDlMsg("Saved");
           setTimeout(() => setDlMsg(""), 1200);
           return;
         }
-      } catch {
-        // ignore → fallback
-      }
 
-      // 2) ✅ 最稳：新开窗口显示图片（微信/IOS：长按保存）
-      const w = window.open();
-      if (w) {
-        w.document.write(`
-          <html>
-            <head>
-              <title>GoodPick</title>
-              <meta name="viewport" content="width=device-width, initial-scale=1" />
-              <style>
-                body{margin:0;display:flex;align-items:center;justify-content:center;background:#000;}
-                img{max-width:100vw;max-height:100vh;}
-                .tip{position:fixed;top:12px;left:12px;right:12px;color:#fff;
-                  font:14px -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial;
-                  background:rgba(0,0,0,.55);padding:10px 12px;border-radius:12px}
-              </style>
-            </head>
-            <body>
-              <div class="tip">${
-                isIOS()
-                  ? "Long-press the image to save to Photos."
-                  : "Right-click / long-press the image to save."
-              }</div>
-              <img src="${dataUrl}" />
-            </body>
-          </html>
-        `);
-        w.document.close();
+        // 2) 桌面端直接下载：不会白纸/黑纸
+        blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = `goodpick-${safeName || "result"}.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
 
-        setDlMsg("Opened");
+        setDlMsg("Downloaded");
         setTimeout(() => setDlMsg(""), 1200);
         return;
       }
 
-      // 3) 最后兜底：a.download（部分环境可用）
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = "goodpick-result.png";
-      a.click();
+      // ✅ blob 失败：退回 dataUrl
+      //（某些环境 blob 会返回 null）
+      const dataUrl = await mod.toPng(el, {
+        pixelRatio: 3,
+        cacheBust: true,
+        backgroundColor: theme.exportBg,
+      });
+
+      // 恢复页面态（以防上面抛错导致没恢复）
+      setExporting(false);
+
+      // 手机/微信：预览页长按保存更稳
+      if (isMobile() || isWeChat()) {
+        const ok = openImagePreview(dataUrl);
+        if (ok) {
+          setDlMsg("Opened");
+          setTimeout(() => setDlMsg(""), 1200);
+          return;
+        }
+      }
+
+      // 最后兜底：a.download dataUrl
+      const a2 = document.createElement("a");
+      a2.href = dataUrl;
+      a2.download = "goodpick-result.png";
+      document.body.appendChild(a2);
+      a2.click();
+      a2.remove();
 
       setDlMsg("Downloaded");
       setTimeout(() => setDlMsg(""), 1200);
     } catch {
       setExporting(false);
-      setDlMsg("Couldn’t");
+      setDlMsg("Couldn’t save");
       setTimeout(() => setDlMsg(""), 1400);
+    } finally {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
     }
   };
 
@@ -484,12 +543,12 @@ function ResultContent() {
           {analysis}
         </div>
 
-        {/* ✅ Brand + Actions: 导出时隐藏；并且 icon-only（去掉 Share/Download 字） */}
-        <div
-          className={`mb-10 flex items-center justify-between ${
-            exporting ? "hidden" : ""
-          }`}
-        >
+        {/* ✅ Brand + Share/Download：
+            - 导出时：保留 goodpick.app（宣传）
+            - 导出时：隐藏右侧按钮
+            - 页面上：按钮无文字（icon-only），提示文字用弹出状态替代
+        */}
+        <div className="mb-10 flex items-center justify-between">
           <a
             href="https://goodpick.app"
             target="_blank"
@@ -499,7 +558,7 @@ function ResultContent() {
             goodpick.app
           </a>
 
-          <div className="flex items-center gap-2">
+          <div className={`flex items-center gap-2 ${exporting ? "hidden" : ""}`}>
             <button
               type="button"
               onClick={handleShare}
@@ -507,11 +566,7 @@ function ResultContent() {
               aria-label="Share"
               title="Share"
             >
-              {shareMsg ? (
-                <span>{shareMsg}</span>
-              ) : (
-                <Share2 size={14} />
-              )}
+              {shareMsg ? <span>{shareMsg}</span> : <Share2 size={14} />}
             </button>
 
             <button
