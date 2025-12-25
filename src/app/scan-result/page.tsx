@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, Suspense, useMemo, useRef } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -107,6 +107,7 @@ function openImagePreview(dataUrl: string) {
 }
 
 function ResultContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const id = searchParams.get("id"); // may be null
 
@@ -117,7 +118,6 @@ function ResultContent() {
   const [dlMsg, setDlMsg] = useState<string>("");
 
   const [exporting, setExporting] = useState(false);
-
   const cardRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -143,6 +143,7 @@ function ResultContent() {
         return;
       }
 
+      // B) 有 id：查 Supabase
       const supabase = createClient();
 
       // 1) 登录：按 id + user_id 查
@@ -180,7 +181,7 @@ function ResultContent() {
         }
       }
 
-      // 3) Public fallback（给“别人手机/微信打开”用）
+      // 3) Public fallback（你建的 RPC）
       try {
         const { data: pub, error: pubErr } = await supabase.rpc(
           "get_scan_public",
@@ -194,7 +195,7 @@ function ResultContent() {
         // ignore
       }
 
-      // 4) 最后兜底：再读 sessionStorage
+      // C) 最后兜底：再读 sessionStorage
       const raw =
         typeof window !== "undefined"
           ? sessionStorage.getItem(GUEST_KEY)
@@ -272,7 +273,6 @@ function ResultContent() {
 
   const showAlternatives = grade !== "green";
 
-  // ✅ 分享：永远分享 /s/{id}（你要的“稳定入口”）
   const handleShare = async () => {
     try {
       setShareMsg("");
@@ -284,12 +284,13 @@ function ResultContent() {
         return;
       }
 
+      // ✅ 分享短链
       const shareUrl = `${origin}/s/${encodeURIComponent(id)}`;
 
       const verdictText =
         grade === "green" ? "Good" : grade === "yellow" ? "Caution" : "Avoid";
 
-      const text = `GoodPick food scan: ${verdictText} (${
+      const text = `GoodPick result: ${verdictText} (${
         Number.isFinite(score) ? score : 0
       }) — ${productName}`;
 
@@ -416,6 +417,7 @@ function ResultContent() {
     }
   };
 
+  // Loading
   if (loading) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-neutral-50">
@@ -427,15 +429,24 @@ function ResultContent() {
     );
   }
 
+  // ✅ Not found：自动回首页（你要的效果）
   if (!data) {
+    useEffect(() => {
+      // 某些 WebView 禁止立刻跳转，所以给一点点延迟
+      const t = setTimeout(() => {
+        router.replace("/");
+      }, 400);
+      return () => clearTimeout(t);
+    }, [router]);
+
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-neutral-50 px-6 text-center">
         <div className="rounded-full bg-neutral-100 p-4 mb-4">
           <ScanLine className="h-8 w-8 text-neutral-400" />
         </div>
-        <h2 className="text-xl font-bold text-neutral-900">Scan not found</h2>
+        <h2 className="text-xl font-bold text-neutral-900">Redirecting…</h2>
         <p className="mt-2 text-neutral-500 mb-8">
-          We couldn't find the analysis results for this item.
+          We couldn&apos;t find the result. Taking you back to scan.
         </p>
         <Link
           href="/"
@@ -451,6 +462,7 @@ function ResultContent() {
     <div
       className={`min-h-screen ${theme.bg} px-6 py-8 transition-colors duration-500`}
     >
+      {/* Top nav */}
       <div className="mb-8 flex items-center justify-between">
         <Link
           href="/"
@@ -468,6 +480,7 @@ function ResultContent() {
         <div className="w-9" />
       </div>
 
+      {/* Card */}
       <div
         ref={cardRef}
         className={`relative z-10 mx-auto w-full max-w-sm rounded-[2rem] ${
@@ -476,6 +489,7 @@ function ResultContent() {
           exporting ? "shadow-none" : "shadow-2xl"
         }`}
       >
+        {/* Score ring */}
         <div className="mb-8 flex justify-center">
           <div className="relative">
             <div
@@ -492,12 +506,14 @@ function ResultContent() {
           </div>
         </div>
 
+        {/* Name */}
         <h1
           className={`mb-3 text-center text-2xl font-black leading-tight ${theme.text}`}
         >
           {productName}
         </h1>
 
+        {/* Badge */}
         <div className="mb-8 flex justify-center">
           <span
             className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-wide ${theme.badge}`}
@@ -507,12 +523,14 @@ function ResultContent() {
           </span>
         </div>
 
+        {/* Analysis */}
         <div
           className={`mb-8 text-center text-sm leading-relaxed font-medium ${theme.subText}`}
         >
           {analysis}
         </div>
 
+        {/* Brand + Share/Download */}
         <div className="mb-10 flex items-center justify-between">
           <a
             href="https://goodpick.app"
@@ -546,6 +564,7 @@ function ResultContent() {
           </div>
         </div>
 
+        {/* CTA */}
         {showAlternatives ? (
           <div className="space-y-3">
             <Link
