@@ -294,7 +294,7 @@ function ResultContent() {
         return;
       }
 
-      const shareUrl = `${origin}/scan-result?id=${encodeURIComponent(id)}`;
+      const shareUrl = `${origin}/s/${encodeURIComponent(id)}`;
 
       const verdictText =
         grade === "green" ? "Good" : grade === "yellow" ? "Caution" : "Avoid";
