@@ -149,7 +149,7 @@ export default function AccountPage() {
                   disabled={loading}
                   className="w-full flex items-center justify-center rounded-xl bg-white/80 px-5 py-2 text-xs font-bold text-emerald-700 ring-1 ring-white/60 hover:bg-white active:scale-95 disabled:opacity-70"
                 >
-                  $7.99 / month
+                  $5.99 / month
                 </button>
 
                 {/* ✅ 合规小字（更小一点） */}
