@@ -15,6 +15,7 @@ import {
   ChartLine,
   Wand2,
   Settings2,
+  Dot,
 } from "lucide-react";
 
 export default function Home() {
@@ -90,13 +91,13 @@ export default function Home() {
 
         if (!response.ok) throw new Error(data?.error || "Something went wrong");
 
-        // ✅ 登录：直接进 scan-result
+        // ✅ logged-in: go to scan-result by id
         if (data?.id) {
           router.push(`/scan-result?id=${data.id}`);
           return;
         }
 
-        // ✅ 未登录：走 guest scan-result
+        // ✅ guest: store in session and go to guest result
         if (data?.scan) {
           sessionStorage.setItem("gp_last_scan", JSON.stringify(data.scan));
           router.push("/scan-result?guest=1");
@@ -118,15 +119,24 @@ export default function Home() {
     if (grade === "yellow")
       return "bg-amber-100 text-amber-800 ring-amber-200";
     if (grade === "red") return "bg-rose-100 text-rose-800 ring-rose-200";
+    if (grade === "avoid") return "bg-neutral-900 text-white ring-neutral-900/10";
+    if (grade === "caution")
+      return "bg-amber-100 text-amber-900 ring-amber-200";
+    if (grade === "good") return "bg-emerald-100 text-emerald-900 ring-emerald-200";
     return "bg-neutral-100 text-neutral-800 ring-neutral-200";
   };
 
+  // ✅ Demo: anchored to your Insights/Swaps/Prefs story
   const demo = useMemo(
     () => ({
+      title: "Too many avoid items lately",
       product: "Chocolate cookies",
       score: 45,
-      grade: "avoid",
+      gradeLabel: "AVOID",
+      topSignal: "Ultra-processed",
       signals: ["Ultra-processed", "Added sugar", "Many additives"],
+      // natural highlight terms users care about
+      focus: ["sugar", "cholesterol", "trans fats", "additives"],
       next: "Swap one ultra-processed snack this week.",
     }),
     []
@@ -186,6 +196,16 @@ export default function Home() {
 
           <p className="mt-3 text-sm font-semibold text-neutral-700 leading-relaxed">
             Not a “nutrition report”. Just clear signals and one next step.
+          </p>
+
+          {/* Natural mention (front but not listy) */}
+          <p className="mt-2 text-xs text-neutral-500 leading-relaxed">
+            Flags issues tied to{" "}
+            <span className="font-semibold text-neutral-900">sugar</span>,{" "}
+            <span className="font-semibold text-neutral-900">cholesterol</span>,{" "}
+            <span className="font-semibold text-neutral-900">trans fats</span>, and{" "}
+            <span className="font-semibold text-neutral-900">additives</span> — without the
+            “nutrition report” vibe.
           </p>
 
           {/* Trust row */}
@@ -254,46 +274,100 @@ export default function Home() {
         {/* Demo preview (conversion driver) */}
         <div className="mt-5 rounded-3xl bg-white/80 ring-1 ring-neutral-200/60 backdrop-blur p-4">
           <div className="flex items-center justify-between">
-            <div className="text-xs font-black text-neutral-700">Preview</div>
+            <div className="text-xs font-black text-neutral-700">
+              Preview <span className="font-semibold text-neutral-400">(example)</span>
+            </div>
             <span
               className={[
                 "text-[11px] font-black rounded-full px-2 py-1 ring-1",
-                gradePill("red"),
+                gradePill("avoid"),
               ].join(" ")}
             >
-              AVOID · score {demo.score}
+              {demo.gradeLabel} · score {demo.score}
             </span>
           </div>
 
-          <div className="mt-3 text-sm font-black text-neutral-900">
-            {demo.product}
-          </div>
-          <div className="mt-1 text-xs text-neutral-600">
-            Top signals:
-            <span className="font-semibold text-neutral-800">
-              {" "}
-              {demo.signals[0]}
-            </span>
+          {/* summary headline like your Insights page */}
+          <div className="mt-3 text-base font-black tracking-tight text-neutral-900">
+            {demo.title}
           </div>
 
-          <div className="mt-3 flex flex-wrap gap-2">
-            {demo.signals.map((s) => (
-              <span
-                key={s}
-                className="text-[11px] font-semibold text-neutral-700 rounded-full bg-neutral-100 px-2 py-1"
-              >
-                {s}
-              </span>
-            ))}
+          <div className="mt-1 text-xs text-neutral-600 leading-relaxed">
+            We flag issues tied to{" "}
+            <span className="font-semibold text-neutral-900">{demo.focus[0]}</span>,{" "}
+            <span className="font-semibold text-neutral-900">{demo.focus[1]}</span>,{" "}
+            <span className="font-semibold text-neutral-900">{demo.focus[2]}</span>, and{" "}
+            <span className="font-semibold text-neutral-900">{demo.focus[3]}</span> — then
+            give you one next step.
           </div>
 
+          {/* product line */}
+          <div className="mt-3 rounded-2xl bg-white ring-1 ring-neutral-200/60 p-3">
+            <div className="flex items-center justify-between">
+              <div className="min-w-0">
+                <div className="text-[11px] font-bold text-neutral-500">
+                  Example item
+                </div>
+                <div className="mt-1 text-sm font-black text-neutral-900 truncate">
+                  {demo.product}
+                </div>
+                <div className="mt-1 text-xs text-neutral-500">
+                  Top signal:{" "}
+                  <span className="font-semibold text-neutral-800">
+                    {demo.topSignal}
+                  </span>
+                </div>
+              </div>
+
+              <div className="shrink-0 ml-3">
+                <span
+                  className={[
+                    "inline-flex items-center justify-center h-9 w-9 rounded-full font-black text-sm ring-4",
+                    "bg-neutral-900 text-white ring-neutral-200",
+                  ].join(" ")}
+                >
+                  {demo.score}
+                </span>
+              </div>
+            </div>
+
+            {/* signal chips */}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {demo.signals.map((s) => (
+                <span
+                  key={s}
+                  className="text-[11px] font-semibold text-neutral-700 rounded-full bg-neutral-100 px-2 py-1"
+                >
+                  {s}
+                </span>
+              ))}
+            </div>
+
+            {/* subtle focus chips (natural, not loud) */}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {["Sugar", "Cholesterol", "Trans fats", "Additives"].map((t) => (
+                <span
+                  key={t}
+                  className="text-[11px] font-semibold text-neutral-600 rounded-full bg-white ring-1 ring-neutral-200/60 px-2 py-1 inline-flex items-center gap-1"
+                >
+                  <Dot size={16} className="text-neutral-300 -ml-1" />
+                  {t}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* next step (like your Insights next step) */}
           <div className="mt-3 rounded-2xl bg-neutral-900 text-white p-3">
             <div className="text-[11px] font-bold opacity-80">Next step</div>
             <div className="text-sm font-black">{demo.next}</div>
+            <div className="mt-1 text-[11px] opacity-70">
+              One small swap per week improves your trend.
+            </div>
           </div>
 
           <div className="mt-3 text-[11px] text-neutral-500">
-            This is the vibe of your Insights + Smart swaps pages.
+            This is what you’ll see in Insights + Smart swaps.
           </div>
         </div>
 
@@ -306,9 +380,7 @@ export default function Home() {
             <div className="mt-2 text-[11px] font-black text-neutral-900">
               Insights
             </div>
-            <div className="text-[10px] text-neutral-500">
-              7/30 day patterns
-            </div>
+            <div className="text-[10px] text-neutral-500">7/30 day patterns</div>
           </div>
 
           <div className="rounded-2xl bg-white ring-1 ring-neutral-200/60 p-3">
@@ -318,9 +390,7 @@ export default function Home() {
             <div className="mt-2 text-[11px] font-black text-neutral-900">
               Smart swaps
             </div>
-            <div className="text-[10px] text-neutral-500">
-              cleaner alternatives
-            </div>
+            <div className="text-[10px] text-neutral-500">cleaner alternatives</div>
           </div>
 
           <div className="rounded-2xl bg-white ring-1 ring-neutral-200/60 p-3">
@@ -330,9 +400,7 @@ export default function Home() {
             <div className="mt-2 text-[11px] font-black text-neutral-900">
               Preferences
             </div>
-            <div className="text-[10px] text-neutral-500">
-              low sugar, etc.
-            </div>
+            <div className="text-[10px] text-neutral-500">low sugar, etc.</div>
           </div>
         </div>
 
@@ -357,8 +425,7 @@ export default function Home() {
                 Keep your trends & history
               </div>
               <div className="mt-1 text-xs text-neutral-600">
-                Log in to save Insights, track patterns, and unlock unlimited
-                scans.
+                Log in to save Insights, track patterns, and unlock unlimited scans.
               </div>
               <Link
                 href="/login"
@@ -392,8 +459,7 @@ export default function Home() {
                               gradePill(scan.grade),
                             ].join(" ")}
                           >
-                            {String(scan.grade || "").toUpperCase()} ·{" "}
-                            {scan.score}
+                            {String(scan.grade || "").toUpperCase()} · {scan.score}
                           </span>
                         </div>
                         <div className="mt-2 font-bold text-neutral-900 truncate">
