@@ -35,7 +35,6 @@ function getOrCreateAnonId() {
 
   let id = localStorage.getItem(ANON_KEY);
   if (!id) {
-    // ✅ 稳一点：极少数环境没有 crypto.randomUUID()
     id =
       typeof crypto !== "undefined" && "randomUUID" in crypto
         ? crypto.randomUUID()
@@ -114,14 +113,11 @@ function ResultContent() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // ✅ Share / Download 提示分别管理（避免互相抢按钮文案）
   const [shareMsg, setShareMsg] = useState<string>("");
   const [dlMsg, setDlMsg] = useState<string>("");
 
-  // ✅ 导出态：去阴影 + 隐藏右侧按钮（但保留 goodpick.app）
   const [exporting, setExporting] = useState(false);
 
-  // ✅ 下载图片用
   const cardRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -147,7 +143,6 @@ function ResultContent() {
         return;
       }
 
-      // B) 有 id：查 Supabase
       const supabase = createClient();
 
       // 1) 登录：按 id + user_id 查
@@ -185,9 +180,7 @@ function ResultContent() {
         }
       }
 
-      // ✅ D) Public fallback：解决“分享到微信/别人手机打不开”
-      // 你需要在 Supabase 建 RPC：get_scan_public(p_id uuid)
-      // 返回至少包含：id, product_name, score, verdict, grade, analysis
+      // 3) Public fallback（给“别人手机/微信打开”用）
       try {
         const { data: pub, error: pubErr } = await supabase.rpc(
           "get_scan_public",
@@ -201,7 +194,7 @@ function ResultContent() {
         // ignore
       }
 
-      // C) 最后兜底：再读 sessionStorage（防止“有 id 但库没写”的情况）
+      // 4) 最后兜底：再读 sessionStorage
       const raw =
         typeof window !== "undefined"
           ? sessionStorage.getItem(GUEST_KEY)
@@ -217,7 +210,6 @@ function ResultContent() {
     };
   }, [id]);
 
-  // ✅ 关键：所有 hooks / memo 都必须在任何 return 之前执行
   const grade = useMemo(() => gradeFromData(data), [data]);
   const score = Number(data?.score ?? 0);
   const productName = data?.product_name || "Unknown Product";
@@ -239,7 +231,7 @@ function ResultContent() {
         backBtn: "bg-white/10 text-white hover:bg-white/20",
         pillBtn: "bg-white/10 text-white hover:bg-white/20",
         brandText: "text-white/40 hover:text-white/70",
-        exportBg: "#111827", // ✅ 导出背景（黑卡不发白）
+        exportBg: "#111827",
       };
     }
     if (grade === "yellow") {
@@ -280,15 +272,13 @@ function ResultContent() {
 
   const showAlternatives = grade !== "green";
 
-  // ✅ Share：永远分享“永久链接”（/scan-result?id=xxx）
+  // ✅ 分享：永远分享 /s/{id}（你要的“稳定入口”）
   const handleShare = async () => {
     try {
       setShareMsg("");
 
-      // ✅ FIX：统一 canonical 域名，避免 www 传播（配合 next.config 永久跳转）
       const origin = "https://goodpick.app";
-
-      if (!id || !origin) {
+      if (!id) {
         setShareMsg("Nothing to share");
         setTimeout(() => setShareMsg(""), 1200);
         return;
@@ -299,11 +289,10 @@ function ResultContent() {
       const verdictText =
         grade === "green" ? "Good" : grade === "yellow" ? "Caution" : "Avoid";
 
-      const text = `GoodPick result: ${verdictText} (${
+      const text = `GoodPick food scan: ${verdictText} (${
         Number.isFinite(score) ? score : 0
       }) — ${productName}`;
 
-      // 1) 系统分享（iOS/Android 最好用）
       if ((navigator as any)?.share) {
         await (navigator as any).share({
           title: "GoodPick",
@@ -315,7 +304,6 @@ function ResultContent() {
         return;
       }
 
-      // 2) 复制链接
       if (navigator.clipboard) {
         await navigator.clipboard.writeText(shareUrl);
         setShareMsg("Link copied");
@@ -323,7 +311,6 @@ function ResultContent() {
         return;
       }
 
-      // 3) 最后兜底
       window.prompt("Copy link:", shareUrl);
       setShareMsg("Copied");
       setTimeout(() => setShareMsg(""), 1200);
@@ -333,10 +320,6 @@ function ResultContent() {
     }
   };
 
-  // ✅ Download：
-  // - 导出态：去阴影 + 隐藏按钮，但保留 goodpick.app
-  // - 电脑端：blob + a.download（避免白纸/黑纸）
-  // - 手机端：优先 share(files)；不支持就预览页长按保存
   const handleDownload = async () => {
     let blobUrl: string | null = null;
 
@@ -346,10 +329,8 @@ function ResultContent() {
       const el = cardRef.current;
       if (!el) throw new Error("no-card");
 
-      // 进入导出态（去阴影、隐藏按钮）
       setExporting(true);
 
-      // 等待 DOM & 字体准备（桌面端空白/黑纸常见原因）
       await new Promise((r) => setTimeout(r, 80));
       // @ts-ignore
       if (document?.fonts?.ready) {
@@ -359,14 +340,12 @@ function ResultContent() {
 
       const mod = await import("html-to-image");
 
-      // ✅ 先 blob（桌面最稳）
       const blob = await mod.toBlob(el, {
         pixelRatio: 3,
         cacheBust: true,
         backgroundColor: theme.exportBg,
       });
 
-      // 恢复页面态
       setExporting(false);
 
       if (blob) {
@@ -382,7 +361,6 @@ function ResultContent() {
 
         const nav: any = navigator;
 
-        // 1) 手机优先系统分享：可“存储图像”
         if (nav?.canShare?.({ files: [file] }) && nav?.share) {
           await nav.share({ title: "GoodPick", files: [file] });
           setDlMsg("Saved");
@@ -390,7 +368,6 @@ function ResultContent() {
           return;
         }
 
-        // 2) 桌面端直接下载：不会白纸/黑纸
         blobUrl = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = blobUrl;
@@ -404,17 +381,14 @@ function ResultContent() {
         return;
       }
 
-      // ✅ blob 失败：退回 dataUrl
       const dataUrl = await mod.toPng(el, {
         pixelRatio: 3,
         cacheBust: true,
         backgroundColor: theme.exportBg,
       });
 
-      // 恢复页面态（以防上面抛错导致没恢复）
       setExporting(false);
 
-      // 手机/微信：预览页长按保存更稳
       if (isMobile() || isWeChat()) {
         const ok = openImagePreview(dataUrl);
         if (ok) {
@@ -424,7 +398,6 @@ function ResultContent() {
         }
       }
 
-      // 最后兜底：a.download dataUrl
       const a2 = document.createElement("a");
       a2.href = dataUrl;
       a2.download = "goodpick-result.png";
@@ -443,7 +416,6 @@ function ResultContent() {
     }
   };
 
-  // Loading
   if (loading) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-neutral-50">
@@ -455,7 +427,6 @@ function ResultContent() {
     );
   }
 
-  // Not found
   if (!data) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-neutral-50 px-6 text-center">
@@ -480,7 +451,6 @@ function ResultContent() {
     <div
       className={`min-h-screen ${theme.bg} px-6 py-8 transition-colors duration-500`}
     >
-      {/* Top nav */}
       <div className="mb-8 flex items-center justify-between">
         <Link
           href="/"
@@ -498,7 +468,6 @@ function ResultContent() {
         <div className="w-9" />
       </div>
 
-      {/* Card */}
       <div
         ref={cardRef}
         className={`relative z-10 mx-auto w-full max-w-sm rounded-[2rem] ${
@@ -507,7 +476,6 @@ function ResultContent() {
           exporting ? "shadow-none" : "shadow-2xl"
         }`}
       >
-        {/* Score ring */}
         <div className="mb-8 flex justify-center">
           <div className="relative">
             <div
@@ -524,14 +492,12 @@ function ResultContent() {
           </div>
         </div>
 
-        {/* Name */}
         <h1
           className={`mb-3 text-center text-2xl font-black leading-tight ${theme.text}`}
         >
           {productName}
         </h1>
 
-        {/* Badge */}
         <div className="mb-8 flex justify-center">
           <span
             className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-wide ${theme.badge}`}
@@ -541,18 +507,12 @@ function ResultContent() {
           </span>
         </div>
 
-        {/* Analysis */}
         <div
           className={`mb-8 text-center text-sm leading-relaxed font-medium ${theme.subText}`}
         >
           {analysis}
         </div>
 
-        {/* ✅ Brand + Share/Download：
-            - 导出时：保留 goodpick.app（宣传）
-            - 导出时：隐藏右侧按钮
-            - 页面上：按钮无文字（icon-only），提示文字用弹出状态替代
-        */}
         <div className="mb-10 flex items-center justify-between">
           <a
             href="https://goodpick.app"
@@ -586,7 +546,6 @@ function ResultContent() {
           </div>
         </div>
 
-        {/* CTA */}
         {showAlternatives ? (
           <div className="space-y-3">
             <Link
