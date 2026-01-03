@@ -6,16 +6,20 @@ import BottomNav from "@/components/BottomNav";
 
 const inter = Inter({ subsets: ["latin"] });
 
-/**
- * ✅ 全站默认 Metadata（OG / Twitter）
- * - 用于：首页、普通页面、以及 scan-result 在 metadata.ts 未命中的兜底
- * - scan-result?id=xxx 会被 app/scan-result/metadata.ts 覆盖（方案 B）
- */
 export const metadata: Metadata = {
   metadataBase: new URL("https://goodpick.app"),
 
   title: "GoodPick — Food Scanner",
   description: "Scan packaged foods and get a clean score + healthier alternatives.",
+
+  // ✅ App 图标（桌面 / PWA / iOS）
+  icons: {
+    icon: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: "/apple-touch-icon.png",
+  },
 
   openGraph: {
     title: "GoodPick — Food Scanner",
@@ -24,9 +28,6 @@ export const metadata: Metadata = {
     url: "https://goodpick.app",
     siteName: "GoodPick",
     type: "website",
-
-    // ✅ 默认 OG 图（动态）
-    // 没有 id 的情况下，也会生成一张“食品评分 App”风格的图
     images: [
       {
         url: "/api/og/scan?v=2",
@@ -46,13 +47,15 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        {/* ✅ 最稳：直接在 head 挂 manifest（兼容所有 Next 版本/类型） */}
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <meta name="theme-color" content="#ffffff" />
+      </head>
+
       <body className={`${inter.className} bg-neutral-50 text-neutral-900`}>
         {/* 页面内容：给 BottomNav 预留空间，避免被挡 */}
         <div className="pb-[calc(84px+env(safe-area-inset-bottom))]">
