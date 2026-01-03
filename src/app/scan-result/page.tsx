@@ -15,6 +15,9 @@ import {
   Download,
 } from 'lucide-react';
 
+// ✅ ADD: iOS/Android Add-to-Home-Screen prompt
+import AddToHomeScreenPrompt from '@/components/AddToHomeScreenPrompt';
+
 const ANON_KEY = 'goodpick_anon_id';
 const GUEST_KEY = 'gp_last_scan';
 
@@ -544,6 +547,9 @@ function ResultContent() {
           </Link>
         )}
       </div>
+
+      {/* ✅ ADD: iOS/Android “Add to Home Screen / Install” prompt */}
+      <AddToHomeScreenPrompt />
     </div>
   );
 }

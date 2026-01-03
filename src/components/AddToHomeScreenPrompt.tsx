@@ -1,98 +1,165 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from 'react';
 
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
-};
+const KEY = 'gp_a2hs_dismissed_v1';
 
 function isIOS() {
-  if (typeof navigator === "undefined") return false;
-  return /iphone|ipad|ipod/i.test(navigator.userAgent);
+  if (typeof navigator === 'undefined') return false;
+  return /iPad|iPhone|iPod/.test(navigator.userAgent);
+}
+
+function isAndroid() {
+  if (typeof navigator === 'undefined') return false;
+  return /Android/i.test(navigator.userAgent);
 }
 
 function isInStandaloneMode() {
-  if (typeof window === "undefined") return false;
-  // iOS Safari standalone
-  const iosStandalone = (window.navigator as any).standalone === true;
-  // Other browsers
-  const displayModeStandalone = window.matchMedia?.("(display-mode: standalone)")?.matches;
-  return iosStandalone || displayModeStandalone;
+  // iOS added-to-home-screen
+  const nav: any = typeof navigator !== 'undefined' ? navigator : {};
+  const iosStandalone = nav.standalone === true;
+
+  // Android/Chrome PWA display-mode
+  const mql =
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia !== 'undefined' &&
+    window.matchMedia('(display-mode: standalone)').matches;
+
+  return iosStandalone || !!mql;
 }
 
-export default function AddToHomeScreenPrompt() {
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [hidden, setHidden] = useState(true);
+export default function AddToHomeScreenPrompt({
+  delayMs = 800,
+}: {
+  delayMs?: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [mode, setMode] = useState<'ios' | 'android' | null>(null);
 
-  const ios = useMemo(() => isIOS(), []);
-  const standalone = useMemo(() => isInStandaloneMode(), []);
+  const shouldRun = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    if (isInStandaloneMode()) return false;
+    const dismissed = localStorage.getItem(KEY) === '1';
+    if (dismissed) return false;
 
+    // iOS：只能引导
+    if (isIOS()) return true;
+
+    // Android：只有捕获到 beforeinstallprompt 才弹
+    if (isAndroid()) return true;
+
+    return false;
+  }, []);
+
+  // Android: 捕获 “Install” 事件
   useEffect(() => {
-    if (standalone) return; // 已经安装/桌面打开就不提示
+    if (typeof window === 'undefined') return;
 
-    // Android/Chrome: 监听 beforeinstallprompt
-    const handler = (e: Event) => {
+    const handler = (e: any) => {
+      // 关键：阻止浏览器默认 mini-infobar
       e.preventDefault();
-      setDeferredPrompt(e as BeforeInstallPromptEvent);
-      setHidden(false);
+      setDeferredPrompt(e);
+      setMode('android');
     };
 
-    window.addEventListener("beforeinstallprompt", handler);
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
 
-    // iOS: 没有 beforeinstallprompt，直接显示引导条
-    if (ios) setHidden(false);
+  // 决定弹窗类型：iOS 直接提示；Android 只有拿到 deferredPrompt 才提示
+  useEffect(() => {
+    if (!shouldRun) return;
 
-    return () => window.removeEventListener("beforeinstallprompt", handler);
-  }, [ios, standalone]);
+    const t = setTimeout(() => {
+      if (isIOS()) {
+        setMode('ios');
+        setOpen(true);
+        return;
+      }
+      // Android：必须拿到 deferredPrompt 才值得弹
+      if (isAndroid() && deferredPrompt) {
+        setMode('android');
+        setOpen(true);
+        return;
+      }
+    }, delayMs);
 
-  if (standalone || hidden) return null;
+    return () => clearTimeout(t);
+  }, [shouldRun, deferredPrompt, delayMs]);
 
-  const onInstallClick = async () => {
-    if (!deferredPrompt) return;
-    await deferredPrompt.prompt();
+  if (!open || !mode) return null;
+
+  const close = () => {
+    localStorage.setItem(KEY, '1');
+    setOpen(false);
+  };
+
+  const installAndroid = async () => {
     try {
+      if (!deferredPrompt) return;
+      // 弹出安装对话框
+      await deferredPrompt.prompt();
+      // 等用户选择
       await deferredPrompt.userChoice;
     } finally {
       setDeferredPrompt(null);
-      setHidden(true);
+      close();
     }
   };
 
   return (
-    <div className="fixed left-0 right-0 bottom-[calc(84px+env(safe-area-inset-bottom))] z-50 px-4">
-      <div className="mx-auto max-w-md rounded-2xl border border-neutral-200 bg-white/95 backdrop-blur p-4 shadow-lg">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-sm font-semibold">Add GoodPick to Home Screen</div>
-
-            {ios ? (
-              <div className="mt-1 text-xs text-neutral-600">
-                iPhone/iPad：点 Safari 的 <b>Share</b>（方框上箭头）→ <b>Add to Home Screen</b>
+    <div className="fixed inset-x-0 bottom-20 z-[9999] px-4">
+      <div className="mx-auto max-w-sm rounded-2xl bg-neutral-900 text-white shadow-2xl">
+        <div className="p-4">
+          {mode === 'ios' ? (
+            <>
+              <div className="text-sm font-bold">Add GoodPick to your Home Screen</div>
+              <div className="mt-2 text-[13px] text-white/80 leading-relaxed">
+                Tap Safari’s <span className="font-semibold">Share</span> button
+                (square with ↑), then choose{' '}
+                <span className="font-semibold">“Add to Home Screen”</span>.
               </div>
-            ) : (
-              <div className="mt-1 text-xs text-neutral-600">
-                Install the app for faster scanning and a full-screen experience.
-              </div>
-            )}
-          </div>
 
-          <button
-            className="text-xs text-neutral-500 hover:text-neutral-800"
-            onClick={() => setHidden(true)}
-          >
-            ✕
-          </button>
+              <div className="mt-3 flex gap-2">
+                <button
+                  className="flex-1 rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold"
+                  onClick={close}
+                >
+                  Got it
+                </button>
+                <button
+                  className="flex-1 rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-neutral-900"
+                  onClick={close}
+                >
+                  OK
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-sm font-bold">Install GoodPick</div>
+              <div className="mt-2 text-[13px] text-white/80 leading-relaxed">
+                Install the app for faster access and a cleaner full-screen experience.
+              </div>
+
+              <div className="mt-3 flex gap-2">
+                <button
+                  className="flex-1 rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold"
+                  onClick={close}
+                >
+                  Not now
+                </button>
+                <button
+                  className="flex-1 rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-neutral-900"
+                  onClick={installAndroid}
+                >
+                  Install
+                </button>
+              </div>
+            </>
+          )}
         </div>
-
-        {!ios && deferredPrompt && (
-          <button
-            onClick={onInstallClick}
-            className="mt-3 w-full rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white"
-          >
-            Install
-          </button>
-        )}
       </div>
     </div>
   );
